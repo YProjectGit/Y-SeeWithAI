@@ -1,0 +1,149 @@
+---
+description: Unity プロジェクト開発ルール（Cursor + Unity CLI Loop）
+alwaysApply: true
+---
+
+# Unity プロジェクトルール（Cursor + Unity CLI Loop）
+
+このドキュメントは Cursor で Unity 開発を行うときのプロジェクトルールとして使う。
+
+## プロジェクト把握（コード変更前）
+
+リポジトリ名は **Y-SeeWithAI**。リポジトリルートが Unity プロジェクトルート。
+
+学生が AI API を触ってインタラクションをつくるワークショップ教材。デモ単位の構成・初心者向けコメント・チュートリアル MD の規約は [WorkshopMaterial.mdc](WorkshopMaterial.mdc) を参照。
+
+コード変更前にプロジェクト構成を把握すること。主要コンテンツは `Assets/{番号}.{題名}/`（例: `Assets/4.VisionToSpeech/`。ピリオド区切り・スペースなし）。共通セットアップは `Assets/Docs/`、各デモの解説はそのフォルダ内の MD。全体概要が未整備の場合は Assets 構成を直接確認する。
+
+## 一般的なルール
+
+- Composerの履歴タイトル（Summary）は、必ず日本語で簡潔に作成してください。
+- 常に日本語で応答してください。
+- 「これをルールとして覚えておいて」と指示されたら、内容に応じて適切なルールファイル（教材方針なら WorkshopMaterial、Unity 開発ループなら本ファイルなど）の末尾に追記する。どれに入れるか迷ったらユーザーに確認する。
+
+
+## 開発ループと DoD
+
+AI にコード編集から Unity Editor 操作まで担当させ、Unity CLI Loop（旧 uLoopMCP）で検証してループを閉じる。変更は小さく、毎回検証してから次へ。**既定は `compile`（必要なら `get-logs`）まで完了**。`run-tests` はテスト対象の変更やユーザー指示時のみ。PlayMode・`screenshot`・入力シミュレーションは**必要性が高いときだけ**（ユーザー明示依頼、compile では判別できない不具合調査、入力・再生など実行なしでは検証不能な変更）。ランタイムっぽい変更でも、ロジックが読めて compile が通るなら PlayMode は省略してよい。詳細は末尾「PlayMode 動作確認の方針」。リファクタ・コメント・型・命名など静的変更は compile のみでよい。
+
+1. 事前観測: 必要なら `get-hierarchy` / `find-game-objects` / `execute-dynamic-code`。Hierarchy は `.uloop/outputs/HierarchyResults/` に保存されパスのみ返る。選択中のみ: `UseSelection: true` または `SearchMode: "Selected"`。
+2. 変更実施: コード編集または `execute-dynamic-code`（メニュー実行・Prefab 配線・GameObject 配置含む）。
+3. コンパイル（既定）: `compile`。CLI 直呼びは `uloop compile --wait-for-domain-reload true`。
+4. ログ: Error 疑いまたは追加検証前後で `get-logs`（LogType / SearchText / UseRegex / SearchInStackTrace / MaxCount。MaxCount は tail 取得）。
+5. テスト（任意）: `run-tests`（FilterType: all/exact/regex/assembly、TestMode: EditMode/PlayMode）。未導入は unsupported と理由を報告。失敗 XML は `.uloop/outputs/TestResults/` の XmlPath を読む。PlayMode テスト中は Domain Reload が一時 OFF（Static 未リセット）。未保存 Scene/Prefab は `SaveBeforeRun: true` を検討。
+6. 実行確認（必要時のみ）: `focus-window` → `control-play-mode` → `get-logs`。視覚確認は `screenshot`。
+7. 完了報告: 実施した検証・結果・未実施と理由・残課題を日本語で明記。PlayMode/スクリーンショット省略時もその旨を書く。
+
+### Definition of Done
+
+- `compile` の ErrorCount が 0（**通常の完了条件**）。
+- 実行した検証はすべて成功（未実施は理由を明記）。
+- 変更内容・検証手順・省略理由・残課題が日本語で報告されている。
+
+### クラウド環境では Unity Editor 確認不要
+
+クラウド環境（Cloud Agent 等、ローカル Unity Editor に接続できない実行環境）で動作している場合、Unity Editor 上での確認は**不要**。
+
+- `uloop` / `compile` / `get-logs` / PlayMode / `screenshot` / 入力シミュレーションなど、Editor 依存の検証は行わない。
+- Editor への接続試行（`uloop launch` 等）もしない。
+- コード変更と完了報告でよい。報告には「クラウド環境のため Editor 検証を省略した」旨を一行書く。
+
+### クラウドでの大きな UI 実装では構成イメージを画像出力する
+
+クラウド環境で **UI 構成に関わる大きめの実装**（新規デモ画面、ペイン分割、主要ラベル／番号の付け替え、入力手段の変更など、見た目の骨格が変わる作業）を行ったときは、完了報告の前に **UI 構成イメージを画像で出力**する。
+
+- Editor の `screenshot` の代替として、現状のレイアウト（ペイン分割・標題・主な操作）が分かるモック／構成図を生成して提示する。
+- 標題や番号を後から変えた場合も、報告時点の表記に合わせて画像を出し直す。
+- 小さな文言修正だけなど、骨格が変わらない変更では不要。
+
+## uloop 運用とツール選択
+
+- **実行手段**: Skills または `uloop` CLI を優先。MCP（`uLoopMCP`）は補助。複数プロジェクトは `--project-path` を明示。大量出力は `.uloop/outputs/`（`HierarchyResults/` / `TestResults/` / `InputRecordings/` 等）のパスを読む。詳細パラメータはパッケージ同梱 `TOOL_REFERENCE_ja.md` を参照。
+- **設計**: ツール数は最小。Editor 操作の大半は `execute-dynamic-code` で足りる。専用ツールは入力シミュレーション・スクリーンショット、および `compile` / `get-logs` / `run-tests` など高頻度ループ向け。
+- **検証優先順位**: ① `compile` → ② `get-logs` → ③ `run-tests` → ④ PlayMode 系（`control-play-mode` / `screenshot` / 入力シミュレーション）。④は必要性が高いときだけ。安易に使わない。`run-tests` は並列実行しない。
+- **構造把握**: `get-hierarchy` / `find-game-objects` / `execute-dynamic-code` を使い分ける。
+- **PlayMode 入力**: uGUI/EventSystem → `simulate-mouse-ui`。Input System 直接読み → `simulate-mouse-input` / `simulate-keyboard`（Active Input Handling: Input System または Both）。再現性 → `record-input` / `replay-input`。いずれも `control-play-mode` と併用。
+- **screenshot**: 視覚確認・UI 座標取得時のみ。`AnnotateElements: true` の SimX / SimY を参照。
+- **get-logs**: Error を少数 tail 取得 → 必要なら絞り込み → ノイズ時は `clear-console`。
+- **CLI 例**: `uloop launch -r`、`uloop compile --wait-for-domain-reload true`、`uloop get-logs --max-count 10`、`uloop run-tests --filter-type all`。
+
+## 例外時
+
+- **接続不可**: `uloop launch`、`--project-path`、CLI/Node.js/ポート/対象プロジェクトを確認。
+- **フリーズ / CLI 不安定**: `uloop launch -r` または `uloop fix` で再試行。
+- **ツール不可**: Security Settings で Allow Tests Execution / Allow Third Party Tools / Dynamic Code Level（1 Restricted 推奨・2 FullAccess）を確認。`execute-dynamic-code` の on/off も同画面。
+- **自動化不可**: 理由と手動再現手順を残す。
+
+## C# コーディング規約
+
+**コメント**
+- 初見でも把握しやすいよう丁寧に、可読性を損なわない（教材向けの厚みは WorkshopMaterial に従う）。
+- 変数宣言の直後に役割を1行。メソッドは処理内容を1行。public メソッドのみ summary、他はコメント文のみ。
+- 通信・API・認証・設定まわりは「何を送受信しているか」が追える解説を厚くする。
+
+**型**
+- `var` は極力避け、ローカル変数は明示型で記述する。
+
+**命名**
+- 意味が伝わる最短名（radius, center, width 等）。位置・速度は `Vector2`/`Vector3` にまとめ、軸は X/Y 接尾辞で統一。同種情報は同じパターンで揃える。
+
+**メソッド配置**
+- エントリポイント（Awake/Start/Update 等）を上、詳細を下。
+- メソッド名とコメントで上から流れが追えるようにする。
+
+**インスペクタ**
+- 設定は起点クラスのインスペクタに集約。Odin 利用時は FoldoutGroup で区分。
+- `[FormerlySerializedAs]` は使わない（参照切れは許容し手動再設定）。
+- インスペクタ公開は `[SerializeField]` より public を優先（private にする必然性がない限り）。
+
+## プランニング
+
+Plan モードで作成・更新するプランニング文書（`.plan.md`）は、**タイトル直後に「要点（サマリー）」セクションを置く**。
+
+- **目的**: 詳細設計に入る前に、何を・なぜ・どう変えるかを初見でも把握できるようにする。
+- **書き方**: 箇条書きと短い表を中心に、専門用語は必要最小限にする。クラス図やファイル一覧などの詳細はサマリーの後に書く。
+- **含める内容（目安）**:
+  - 何をするか（1〜2 文）
+  - 現状と変更後の違い（表または箇条書き）
+  - 設計の骨格（継承・責務分担など、判断の要点だけ）
+  - 触らないもの・完了条件
+  - 必要なら「一言」で全体を要約
+- **更新**: プラン内容をユーザーと擦り合わせて変更したら、要点セクションも同期して更新する。
+
+## シーン・Prefab 編集
+
+### Unityシーンはuloopで編集する
+
+- Unityシーン（`.unity`）の作成・変更・GameObject追加・コンポーネント設定・参照配線・保存は、原則として **uloop**（専用ツールまたは `execute-dynamic-code`）で行う。
+- シーンYAMLの直接編集は、fileID・参照・シリアライズ形式の破損や意図しない差分を招きやすいため行わない。
+- uloopでシーンを保存した後は、Hierarchyとディスク上の差分を確認し、対象外のGameObjectやシリアライズ値が変わっていないことを検証する。
+- uloopが利用できず作業を完了できない場合は、YAML編集へ切り替えず、理由と阻害要因をユーザーへ報告して判断を求める。
+
+シーン編集時に、以前のパラメータへ意図せず戻ることがある。Prefab 本体・シーンオーバーライド・インライン展開を取り違えないよう、次を守る。
+
+**戻ってしまう主な原因**
+- シーン上のオーバーライドと Prefab 本体のデフォルト値が別々に存在し、片方だけ更新した
+- フィールド名変更後、シーン YAML に残った旧 `propertyPath`（例: `paramSets.Array.data[0].fontSize`）が無効化された
+- Prefab を更新したが、シーン側のインライン値を確認・保存していない
+
+**作業手順**
+1. 編集前に、正の値が **シーンオーバーライド / Prefab 本体 / シーン内インライン** のどれかを確認する
+2. シリアライズ名や構造を変えたら、対象 `.unity` / `.prefab` を grep し、**旧 `propertyPath` の残存**を確認・削除する
+3. Prefab 更新後は、**シーン側の該当コンポーネント値も grep で照合**する
+4. `execute-dynamic-code` で Prefab / シーンを触ったら、**保存まで実行**し、ディスク上の YAML に意図した値が書かれているか確認する
+5. 可能なら Prefab 操作とシーン操作を分け、**両方を同時にいじらない**
+
+**完了確認**
+- 変更対象ファイル（`.unity` / `.prefab`）を grep し、意図したフィールド名・値が残っていること
+- 旧フィールド名・旧 `propertyPath` が残っていないこと
+
+## PlayMode 動作確認の方針
+
+PlayMode での動作確認（`control-play-mode`、PlayMode 中の `execute-dynamic-code` 検証、`screenshot`、入力シミュレーション）は**既定では行わない**。`compile`（必要なら `get-logs`）で足りる。
+
+**必要性が高いときだけ** PlayMode を使う。目安:
+- ユーザーが PlayMode / 見た目 / ランタイム挙動の確認を明示的に依頼した
+- コンパイルや静的確認では原因・成否が判別できない不具合調査
+- 入力・再生・タイミング依存など、Editor 上の実行なしでは検証できない変更
+
+レイアウト計算の追加、インスペクタオプション追加、条件分岐の修正など、ロジックが読めて compile が通る変更では PlayMode を省略してよい。省略した場合は完了報告にその旨を一行書く。

@@ -1,0 +1,63 @@
+---
+description: Pre-coding discipline, simplicity, surgical diffs. Verification and DoD defer to UnityDev.mdc.
+alwaysApply: true
+---
+
+# KapathyCustom
+
+Verification, Unity conventions, and definition of done: **[UnityDev.mdc](UnityDev.mdc)**. This rule covers what to write and what to touch only.
+
+## 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them — don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+Ask only when unclear. For verification, follow UnityDev; don't block the loop with redundant confirmations.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or configurability that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+Simplicity applies to **code structure and scope**, not comments. Follow UnityDev comment rules (clear variable and method comments) as written — do not strip or shorten them for "simplicity."
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- If you notice unrelated dead code, mention it — don't delete it.
+
+When your changes create orphans:
+
+- Remove imports/variables/functions that **your changes** made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Success Criteria
+
+- Before starting, state success criteria in one sentence (e.g. "`compile` ErrorCount 0", "X works in PlayMode").
+- Follow UnityDev workflow and Definition of Done for how to verify.
+- `run-tests`, PlayMode, and `screenshot` only when UnityDev says they are needed.
+- Do not default to creating tests where no test harness exists.
+
+---
+
+**These guidelines are working if:** fewer unnecessary changes in diffs, and success criteria plus interpretation are clear before implementation.
