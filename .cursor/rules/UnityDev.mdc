@@ -13,7 +13,7 @@ alwaysApply: true
 
 学生が AI API を触ってインタラクションをつくるワークショップ教材。デモ単位の構成・初心者向けコメント・チュートリアル MD の規約は [WorkshopMaterial.mdc](WorkshopMaterial.mdc) を参照。
 
-コード変更前にプロジェクト構成を把握すること。主要コンテンツは `Assets/{番号}.{題名}/`（例: `Assets/4.VisionToSpeech/`。ピリオド区切り・スペースなし）。共通セットアップは `Assets/Docs/`、各デモの解説はそのフォルダ内の MD。全体概要が未整備の場合は Assets 構成を直接確認する。
+コード変更前にプロジェクト構成を把握すること。主要コンテンツは `Assets/{番号}.{題名}/`（例: `Assets/1.VisionToSpeech/`。ピリオド区切り・スペースなし）。共通セットアップは `Assets/Docs/`、各デモの解説はそのフォルダ内の MD。全体概要が未整備の場合は Assets 構成を直接確認する。
 
 ## 一般的なルール
 

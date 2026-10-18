@@ -42,21 +42,18 @@ Live セッション（WebSocket）・マイク制御・音声再生・Status �
 | `GeminiJson.cs` | JSON のエスケープ・整形・省略表示 |
 | `GeminiJsonScan.cs` | Live API の受信 JSON からキーを頼りに文字列を拾う |
 | `GeminiKey.cs` | APIキー読込・マスク・generateContent の URL |
-| `GeminiTextResponse.cs` | generateContent のレスポンスから candidates[0] のテキスト |
 | `AudioCodec.cs` | AudioClip ⇄ WAV / PCM16 の変換 |
-| `MicLevel.cs` | マイク直近窓の RMS → レベルメーター用 0〜1 |
-| `HttpDisplay.cs` | Request / Response ペインに出す文字列の整形 |
 | `TextureUtil.cs` | テクスチャの縮小 |
 | `ChatBubble.cs` | チャット1件分の吹き出し（唯一の `MonoBehaviour`） |
 | `ResponseTime.cs` | 送信→返信の経過時間を Console に出す |
 
 ### 変更したくなったら（eject）
 
-`Assets/Common/` は 4 デモすべてが使っている。**挙動を変えたくなったら Common を直さず、そのファイルを自分のデモの `Script/` にコピーしてクラス名を変える。** Common を直すと他のデモが巻き添えで壊れる。
+`Assets/Common/` は 2 デモすべてが使っている。**挙動を変えたくなったら Common を直さず、そのファイルを自分のデモの `Script/` にコピーしてクラス名を変える。** Common を直すと他のデモが巻き添えで壊れる。
 
 ## フォルダ構成（デモ単位）
 
-番号付きフォルダを 1 セットとして扱う。例: `Assets/4.VisionToSpeech/`
+番号付きフォルダを 1 セットとして扱う。例: `Assets/1.VisionToSpeech/`
 
 デモフォルダ直下に置くもの（入口だけ）:
 
@@ -79,8 +76,8 @@ Live セッション（WebSocket）・マイク制御・音声再生・Status �
 
 命名:
 
-- デモフォルダ: `Assets/{番号}.{題名}/`（番号は学習順。半角の番号＋ピリオド＋題名。**スペースは入れない**。例: `4.VisionToSpeech` / `5.ScreenToSpeech` / `6.TextToImage`）
-- 番号は `4` / `5` のように数字だけでもよい（同一入力段階で枝分かれするときは `1A` / `1B` も可）
+- デモフォルダ: `Assets/{番号}.{題名}/`（番号は学習順。半角の番号＋ピリオド＋題名。**スペースは入れない**。例: `1.VisionToSpeech` / `2.ScreenToSpeech`）
+- 番号は `1` / `2` のように数字だけでもよい（同一入力段階で枝分かれするときは `1A` / `1B` も可）
 - シーン名・メインスクリプト名は題名と揃える（例: VisionToSpeech）
 - プロジェクト全体の環境準備（API キー取得など）は `Assets/Docs/` に置き、各デモの MD からリンクする
 
@@ -102,15 +99,15 @@ UnityDev のコメント規約に加え、教材として次を守る。
 
 ## チュートリアル MD（README）
 
-各デモフォルダの `README.md` は学生向けガイド。口調・構成の正本は [`Assets/4.VisionToSpeech/README.md`](../../Assets/4.VisionToSpeech/README.md)。新規デモや README 編集時は、そこに寄せる（細かい文言の往復を減らす）。
+各デモフォルダの `README.md` は学生向けガイド。口調・構成の正本は [`Assets/1.VisionToSpeech/README.md`](../../Assets/1.VisionToSpeech/README.md)。新規デモや README 編集時は、そこに寄せる（細かい文言の往復を減らす）。
 
 ### 章構成（この順を基本）
 
 章のあいだは `---` で区切る（空行だけではプレビューでつぶれるため）。
 
-1. **タイトル** — `# {番号}.{題名}`（例: `# 4.VisionToSpeech`）。サブタイトルや「可視化付き」などは付けない
+1. **タイトル** — `# {番号}.{題名}`（例: `# 1.VisionToSpeech`）。サブタイトルや「可視化付き」などは付けない
 2. **シリーズ位置づけ** — `Assets/Docs/demo-series-overview.md` への1行リンクのみ。「次のデモ」予告は書かない
-3. **このデモで学べること** — **トピック名（太字）＋1行の短い説明**を列挙する（問いかけにしない）。正本は [`Assets/6.TextToImage/README.md`](../../Assets/6.TextToImage/README.md)。ワークショップ全体のテーマから見た学習トピックを書く（このデモ内部の細部・UI欄の話は書かない）。3つ前後
+3. **このデモで学べること** — **トピック名（太字）＋1行の短い説明**を列挙する（問いかけにしない）。正本は [`Assets/1.VisionToSpeech/README.md`](../../Assets/1.VisionToSpeech/README.md)。ワークショップ全体のテーマから見た学習トピックを書く（このデモ内部の細部・UI欄の話は書かない）。3つ前後
 4. **事前準備** — 動かすために必要なことだけ。動作指示（「〜してください」）。APIキー等は何のためのキーかを一文で示し、手順は `Assets/Docs/` へリンク。Unity を開く・UI 同梱などの自明な項目は書かない
 5. **動かし方** — シーンを開いて Play、のあと **大きな体験の流れ**（3つ前後の `###`）に分ける。各ステップは動作指示。トラブルシュート（「うまくいかないとき」）は書かない
 6. **概念の節**（デモで学ぶ用語ごと）— 見出しは `〜とは？`。一般的な意味 → このデモでの見え方 → 必要なら試し方。表は差分比較に本当に必要なときだけ（説明用の表は避ける）

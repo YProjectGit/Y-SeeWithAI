@@ -6,7 +6,7 @@
 //   WAV バイト列 … Gemini の REST に inlineData として送る形（ヘッダ + 16bit PCM）
 //   PCM16 バイト列 … Live API が送受信する生の音声（16bit・リトルエンディアン）
 //
-// 使っているデモ: 2A / 2B / 2C / 3A / 3B / 3C / 4 / 5
+// 使っているデモ: 1 / 2
 
 using System.IO;
 using System.Text;

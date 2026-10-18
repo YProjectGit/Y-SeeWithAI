@@ -18,14 +18,10 @@
 
 上から学習していく順です。
 
-- **[4.VisionToSpeech](../4.VisionToSpeech/)**  
+- **[1.VisionToSpeech](../1.VisionToSpeech/)**<br>
   カメラが捉えたものについて、映像を見せて声で話す
-- **[5.ScreenToSpeech](../5.ScreenToSpeech/)**  
+- **[2.ScreenToSpeech](../2.ScreenToSpeech/)**<br>
   アプリ自身が描く画面を見せ、画面の中身を声で解釈する
-- **[6.TextToImage](../6.TextToImage/)**  
-  言葉から絵を1枚受け取る
-- **[7.ImageToImage](../7.ImageToImage/)**  
-  元画像と指示を一緒に送り、いまある絵を変える
 
 ---
 
@@ -33,6 +29,6 @@
 
 - 各デモの本体は、そのフォルダのメインスクリプト1本です。処理は送信 → 待ち → 受信の順です。
 - リクエスト JSON の組み立てと、レスポンスからの取り出しは、そのスクリプトに書いてあります。共通化していません。
-- 画面中央が Request、右が Response です。`5` と `7` にはこの欄がありません。
+- 1.VisionToSpeech は画面中央が送信、右が受信です。2.ScreenToSpeech は描画パッドと字幕を中心にした画面です。
 - `Assets/Common/Script/` は JSON 整形・APIキー読込・音声変換などのユーティリティです。デモの流れを読むときは見なくてよいです。
 - 改変するときはデモフォルダをコピーしてください。`Common` を変えると全デモに波及します。

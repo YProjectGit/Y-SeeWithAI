@@ -1,5 +1,5 @@
 // ScreenToSpeech.cs
-// 4.VisionToSpeech の姉妹デモ。WebCam ではなく、描画パッドの JPEG を Live API に送る。
+// 1.VisionToSpeech の姉妹デモ。WebCam ではなく、描画パッドの JPEG を Live API に送る。
 // 送信／受信のテキスト欄は出さず、紙・消す・状態・字幕だけの体験画面にする。
 //
 // 上からの流れ:
@@ -172,7 +172,7 @@ public class ScreenToSpeech : MonoBehaviour
         sb.Append(GeminiJson.Escape(modelName));
         sb.Append("\",");
 
-        // クライアントが activityStart/End でターンを区切る（4 と同じ）
+        // クライアントが activityStart/End でターンを区切る（1 と同じ）
         sb.Append("\"realtimeInputConfig\":{\"automaticActivityDetection\":{\"disabled\":true}},");
         sb.Append("\"outputAudioTranscription\":{},");
 

@@ -12,17 +12,21 @@
 
 - **Unity 6.3**（このプロジェクトは `6000.3.6f1`）
 - **Google アカウント**（APIキー用。TalkWithAI で取得済みなら、同じキーを使えます）
-- **カメラ**（4.VisionToSpeech / 7.ImageToImage）
-- **スピーカーまたはヘッドホン**（4 / 5 の音声再生）
+- **カメラ**（1.VisionToSpeech）
+- **スピーカーまたはヘッドホン**（1 / 2 の音声再生）
 
 ---
+
+## 教材のダウンロード
+
+[GitHub Releases](https://github.com/YProjectGit/Y-SeeWithAI/releases/latest) の Assets から **Y-SeeWithAI.zip** をダウンロードし、展開してください。
 
 ## 最初にやること
 
 1. Unity Hub でこのフォルダを開き、バージョン `6000.3.6f1` で開いてください。
 2. Google AI Studio から Gemini の API にアクセスするための APIキーを取得し、`Assets/Common/APIKey.txt` に保管してください。  
    手順 → [Assets/Docs/gemini-ai-studio-setup.md](Assets/Docs/gemini-ai-studio-setup.md)
-3. Project ウィンドウで `Assets/4.VisionToSpeech/VisionToSpeech.unity` を開き、Play してください。
+3. Project ウィンドウで `Assets/1.VisionToSpeech/VisionToSpeech.unity` を開き、Play してください。
 
 無料枠で 429 が出たら → [Assets/Docs/gemini-api-pricing.md](Assets/Docs/gemini-api-pricing.md)
 
@@ -34,7 +38,5 @@
 
 | デモ | 学ぶこと |
 |------|----------|
-| [4.VisionToSpeech](Assets/4.VisionToSpeech/) | カメラ映像について声で話す |
-| [5.ScreenToSpeech](Assets/5.ScreenToSpeech/) | アプリ自身が描く画面を声で解釈する |
-| [6.TextToImage](Assets/6.TextToImage/) | 言葉から絵を1枚受け取る |
-| [7.ImageToImage](Assets/7.ImageToImage/) | 元画像と指示を送り、いまある絵を変える |
+| [1.VisionToSpeech](Assets/1.VisionToSpeech/) | カメラ映像について声で話す |
+| [2.ScreenToSpeech](Assets/2.ScreenToSpeech/) | アプリ自身が描く画面を声で解釈する |

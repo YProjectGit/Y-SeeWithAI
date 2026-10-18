@@ -32,10 +32,9 @@ APIキーを取った直後は **Free Tier** です。トークン代はかか�
 
 | モデル | よくある無料の1日回数 | この教材での使いどころ |
 |---|---|---|
-| `gemini-3.1-flash-lite` | 約 500回 | 1A〜3A のテキスト / STT / チャット（この教材の既定） |
+| `gemini-3.1-flash-lite` | 約 500回 | 先行教材 Y-TalkWithAI のテキスト / STT / チャット |
 | `gemini-3.6-flash` など通常の Flash | 約 20回 | 使わない（無料枠が小さい） |
-| Live / TTS 向けモデル | モデルごとに別枠 | 3A の声、3B / 3C / 4 / 5 の Live |
-| `gemini-3.1-flash-image` など画像モデル | モデルごとに別枠（Lite テキストより少ないことが多い） | 6 の画像生成（7 も同じ系統） |
+| Live / TTS 向けモデル | モデルごとに別枠 | 1.VisionToSpeech / 2.ScreenToSpeech の Live |
 
 回数は **プロジェクト × モデル** です。Flash を使い切っても、Lite の枠は残っていることがあります。
 
@@ -105,7 +104,7 @@ Unity の右ペイン（Response）に次が出たら、無料枠です。
 | テキスト / JSON | `gemini-3.1-flash-lite` | $0.25 | $1.50 |
 | テキスト / JSON | `gemini-3.6-flash` | $0.75 | $3.75 |
 | TTS（3A） | `gemini-3.1-flash-tts-preview` | $1.00（テキスト） | $20.00（音声） |
-| Live（3B / 3C / 4 / 5） | `gemini-3.1-flash-live-preview` | 音声 約 $0.005/分 | 音声 約 $0.018/分 |
+| Live（1 / 2） | `gemini-3.1-flash-live-preview` | 音声 約 $0.005/分 | 音声 約 $0.018/分 |
 
 1ドル ≈ 150円で見た、**学生1人・半日**の目安です。
 

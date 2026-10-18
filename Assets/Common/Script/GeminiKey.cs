@@ -8,7 +8,7 @@
 // ここは「読む」だけで、失敗をどう見せるか（Status 欄・Response 欄・ログの接頭辞）は
 // 各デモが決める。TryRead が false を返したら error にその理由が入る。
 //
-// 使っているデモ: 1A / 1B / 2A / 2B / 2C / 3A / 3B / 3C / 4 / 5 / 6 / 7
+// 使っているデモ: 1 / 2
 
 using System.IO;
 using UnityEngine;

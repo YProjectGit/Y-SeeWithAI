@@ -6,8 +6,11 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/4.VisionToSpeech/VisionToSpeech.unity
+    path: Assets/1.VisionToSpeech/VisionToSpeech.unity
     guid: cc35fc9c866248a6bb4430d12116dc00
+  - enabled: 1
+    path: Assets/2.ScreenToSpeech/ScreenToSpeech.unity
+    guid: e7b3c5a194d84f2e8a6c0d1f3b5e7290
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   m_UseUCBPForAssetBundles: 0
