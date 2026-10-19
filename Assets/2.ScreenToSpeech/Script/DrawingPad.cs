@@ -28,6 +28,10 @@ public class DrawingPad : MonoBehaviour, IPointerDownHandler, IDragHandler, IPoi
     bool hasLastPixel; // lastPixel が有効か
     bool hasInk; // 1ドットでも描いたか（空送信防止）
     bool dirty; // 前回送信以降に描き足したか
+    bool strokeCompleted;
+    int drawingPointerId;
+    public bool IsDrawing { get; private set; }
+    public bool HasCompletedStroke => strokeCompleted && !IsDrawing && hasInk && dirty;
 
     /// <summary>紙のテクスチャ。JPEG 化の入力。</summary>
     public Texture2D CanvasTexture
@@ -66,12 +70,17 @@ public class DrawingPad : MonoBehaviour, IPointerDownHandler, IDragHandler, IPoi
     // ポインタを下ろした位置に点を打ち、線の始点にする
     public void OnPointerDown(PointerEventData eventData)
     {
+        if (IsDrawing || eventData.button != PointerEventData.InputButton.Left)
+            return;
         Vector2 pixel;
         if (!TryScreenToPixel(eventData, out pixel))
         {
             return;
         }
 
+        IsDrawing = true;
+        drawingPointerId = eventData.pointerId;
+        strokeCompleted = false;
         StampLine(pixel, pixel);
         lastPixel = pixel;
         hasLastPixel = true;
@@ -80,6 +89,8 @@ public class DrawingPad : MonoBehaviour, IPointerDownHandler, IDragHandler, IPoi
     // 直前の点から今の点まで円を並べ、途切れない線にする
     public void OnDrag(PointerEventData eventData)
     {
+        if (!IsDrawing || eventData.pointerId != drawingPointerId)
+            return;
         Vector2 pixel;
         if (!TryScreenToPixel(eventData, out pixel))
         {
@@ -102,7 +113,18 @@ public class DrawingPad : MonoBehaviour, IPointerDownHandler, IDragHandler, IPoi
     // ポインタを離したら、次の線の始点を忘れる
     public void OnPointerUp(PointerEventData eventData)
     {
+        if (!IsDrawing || eventData.pointerId != drawingPointerId)
+            return;
+        IsDrawing = false;
+        strokeCompleted = dirty;
         hasLastPixel = false;
+    }
+
+    void OnDisable()
+    {
+        IsDrawing = false;
+        hasLastPixel = false;
+        strokeCompleted = false;
     }
 
     /// <summary>
@@ -116,6 +138,8 @@ public class DrawingPad : MonoBehaviour, IPointerDownHandler, IDragHandler, IPoi
         hasInk = false;
         dirty = false;
         hasLastPixel = false;
+        IsDrawing = false;
+        strokeCompleted = false;
     }
 
     /// <summary>
@@ -124,6 +148,7 @@ public class DrawingPad : MonoBehaviour, IPointerDownHandler, IDragHandler, IPoi
     public void MarkClean()
     {
         dirty = false;
+        strokeCompleted = false;
     }
 
     /// <summary>

@@ -66,7 +66,8 @@ public static class VisionToSpeechLayout
         ui.Text("画像に添える指示", center, 22, 490, 568, 28, 19, Muted);
         demo.framePromptField = ui.Input(inputTemplate, center, 22, 524, 568, 70, 19);
         demo.framePromptField.text = demo.framePromptText;
-        ui.Text("送信のたびに画像を更新", center, 22, 602, 568, 25, 18, Muted);
+        demo.framePromptField.readOnly = true;
+        ui.Text("Inspectorで編集 / 次の画像送信から反映", center, 22, 602, 568, 25, 18, Muted);
         var response = ui.Box("Response", right, 22, 72, 568, 397, Well);
         demo.transcriptionText = ui.ScrollText(response, "LatestResponse", 18, 18, 532, 238, 30, out var responseScroll);
         demo.transcriptionText.text = "画像を送信すると、ここに返答が表示されます。";
@@ -83,9 +84,10 @@ public static class VisionToSpeechLayout
         demo.responseHistoryText = ui.ScrollText(right, "History", 22, 540, 568, 80, 20, out var historyScroll);
         demo.responseHistoryText.text = "まだ返答はありません";
         ui.Text("設定・接続情報", settings, 22, 14, 568, 34, 25);
-        ui.Text("System Instruction  /  変更は次回接続時に反映", settings, 22, 54, 568, 26, 17, Muted);
+        ui.Text("事前指示 / Inspectorで編集・次回Playから反映", settings, 22, 54, 568, 26, 17, Muted);
         demo.systemInstructionField = ui.Input(inputTemplate, settings, 22, 86, 568, 67, 19);
-        demo.systemInstructionField.text = inputTemplate.text;
+        demo.systemInstructionField.text = demo.systemInstructionText;
+        demo.systemInstructionField.readOnly = true;
         demo.setupHeaderText = ui.ScrollText(settings, "Settings", 22, 164, 568, 200, 18, out var settingsScroll);
         demo.setupHeaderText.text = "Model    " + demo.modelName + "\nVoice    " + demo.voiceName + "\nResponse    AUDIO + 文字起こし\n画像    長辺 " + demo.maxSendLongSide + " px / JPEG " + demo.jpegQuality + "\nStream    " + demo.streamIntervalSeconds.ToString("0.0") + " 秒 / 返答・再生完了を待機\nSession    WebSocket / 未接続\nResolution    " + demo.mediaResolution;
         ui.Text("送信ログ", outgoing, 22, 14, 240, 34, 25);

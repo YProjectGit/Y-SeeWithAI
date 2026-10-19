@@ -61,7 +61,7 @@ public partial class VisionToSpeech
         if (framePromptField != null)
         {
             framePromptField.SetTextWithoutNotify(framePromptText);
-            framePromptField.onValueChanged.AddListener(value => framePromptText = value);
+            framePromptField.readOnly = true;
         }
         SetResponseCaption("画像を送信すると、ここに返答が表示されます。");
         if (sentFramePreview != null)
@@ -172,6 +172,7 @@ public partial class VisionToSpeech
             streamModeButtonLabel.text = "Stream";
         if (recordHintText != null)
             recordHintText.text = streamMode ? "Stream：返答と音声再生が終わると次を送信" : "シャッター：Space またはボタンで1枚送信";
+        RefreshInstructionDisplay();
         if (setupHeaderText != null)
             setupHeaderText.text = BuildSetupSettingsSummary();
         if (outboundStatusText != null)
@@ -183,7 +184,7 @@ public partial class VisionToSpeech
         if (inboundStatusText != null)
             inboundStatusText.text = dashboardError != null ? "エラー" : IsAudioPending ? "音声を再生中" : isTurnBusy ? "返答待ち" : outboundFrameCount == 0 ? "画像の送信待ち" : "返答完了";
         if (systemInstructionField != null)
-            systemInstructionField.readOnly = connected;
+            systemInstructionField.readOnly = true;
     }
 
     void UpdateWaveform()

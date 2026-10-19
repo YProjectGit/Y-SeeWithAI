@@ -4,7 +4,7 @@
 //
 // 上からの流れ:
 //   Start → APIキー・体験 UI・AudioSource・Live 接続（Setup）
-//   描く → dirty なら約1秒間隔で
+//   描く → 1ストローク終了時（ポインタを離した時）に
 //     画像と実況指示を clientContent の1ターンにまとめて送信 → 音声返答
 //   受信 → serverContent の音声を再生キューへ / output transcription を字幕へ
 //   消す → 紙を白紙に（空の紙は送らない）
@@ -37,11 +37,15 @@ public partial class ScreenToSpeech : MonoBehaviour
     public int playbackSampleRate = 24000; // 受信 PCM の想定サンプルレート（Hz）
     public int maxSendLongSide = 768; // 送信 JPEG の長辺上限（推奨解像度）
     public int jpegQuality = 75; // EncodeToJPG の品質（1〜100）
-    public float interpretIntervalSeconds = 1f; // 自動送信の間隔（約1 FPS）
     public string mediaResolution = "MEDIA_RESOLUTION_MEDIUM"; // generationConfig の mediaResolution
+    [Header("指示 / Inspectorが編集元")]
+    [TextArea(3, 6)]
+    [Tooltip("接続時に適用します。変更後はPlayを再開してください。テキストファイルは自動出力です。")]
     public string systemInstructionText =
         "あなたは、人がいま描いている絵を見る実況者です。紙に見えている線や形を、日本語で短くやさしく話してください。途中の線でも、いま見えているものから推測してよいです。まだほとんど描かれていないときは、無理に物語を作らず、見えていることだけを言ってください。返答は1文にしてください。"; // Setup の事前指示（画面には出さない）
     [Range(20, 100)] public int responseCharacterLimit = 40; // 音声と字幕の返答長を指示
+    [TextArea(2, 5)]
+    [Tooltip("画像送信のたびに適用します。テキストファイルは自動出力です。")]
     public string framePromptText =
         "このキャンバスに描かれている絵を、日本語で短く実況してください。"; // フレームと一緒に送る指示
 
@@ -75,11 +79,27 @@ public partial class ScreenToSpeech : MonoBehaviour
 
     static readonly Color BackgroundColor = new Color(0.12f, 0.11f, 0.10f, 1f); // カメラ背景
 
+    // Inspectorの設定を確認・配布用テキストに出力する。
+    public void ExportInstructionFiles()
+    {
+        WriteInstructionFile("2.ScreenToSpeech/SystemInstruction.txt", systemInstructionText);
+        WriteInstructionFile("2.ScreenToSpeech/FramePrompt.txt", framePromptText);
+    }
+
+    static void WriteInstructionFile(string relativePath, string text)
+    {
+        string path = Path.Combine(Application.dataPath, relativePath);
+        text = text ?? string.Empty;
+        if (!File.Exists(path) || File.ReadAllText(path) != text)
+            File.WriteAllText(path, text, new UTF8Encoding(false));
+    }
+
     // ----- エントリポイント -----
 
     // 起動時: キー・体験 UI・再生・Live 接続を順に用意する
     void Start()
     {
+        ExportInstructionFiles();
         LoadApiKey();
         EnsureRuntimeBasics();
         EnsurePlaybackAudioSource();
@@ -178,44 +198,34 @@ public partial class ScreenToSpeech : MonoBehaviour
     // Setup メッセージ（最初に1回だけ送るセッション設定）
     string BuildSetupJson()
     {
+        appliedSystemInstruction = systemInstructionText ?? string.Empty;
+        RefreshInstructionDisplay();
         return GeminiLiveMessages.Setup(modelName, voiceName, mediaResolution,
-            GeminiAudioResponse.WithAudioInstruction(systemInstructionText + ShortReplyInstruction()));
+            GeminiAudioResponse.WithAudioInstruction(appliedSystemInstruction + ShortReplyInstruction()));
     }
 
     string ShortReplyInstruction() => $"\n返答は日本語で{Mathf.Clamp(responseCharacterLimit, 20, 100)}文字以内、短い1文だけにしてください。前置きや質問を付けず、最も目立つ特徴だけを話してください。";
 
     // ----- 自動送信（描きながらの解釈） -----
 
-    // dirty かつインクありなら、約1秒間隔で1ターン送る
+    // ストロークが完了し、前の返答と音声再生が終わったら送る。
+    bool CanSendCompletedStroke => isConnected && setupComplete && !isTurnBusy && !IsAudioPending
+        && drawingPad != null && drawingPad.HasCompletedStroke;
+
     IEnumerator InterpretLoopCoroutine()
     {
         while (isConnected)
         {
-            float waited = 0f;
-            while (isConnected && waited < interpretIntervalSeconds)
-            {
-                waited += Time.unscaledDeltaTime;
-                yield return null;
-            }
-
-            if (!isConnected || !setupComplete || isTurnBusy || IsAudioPending)
-            {
-                continue;
-            }
-
-            if (drawingPad == null || !drawingPad.HasInk || !drawingPad.IsDirty)
-            {
-                continue;
-            }
-
-            yield return StartCoroutine(SendFrameTurnCoroutine());
+            yield return null;
+            if (CanSendCompletedStroke)
+                yield return StartCoroutine(SendFrameTurnCoroutine());
         }
     }
 
     // 画像とテキストを1つの clientContent に入れ、turnComplete で返答を求める
     IEnumerator SendFrameTurnCoroutine()
     {
-        if (isTurnBusy || IsAudioPending)
+        if (!CanSendCompletedStroke)
         {
             yield break;
         }
@@ -244,9 +254,7 @@ public partial class ScreenToSpeech : MonoBehaviour
 
         // 画像と指示を同じターンに含め、画像の到着前に回答が始まる競合を防ぐ。
         // 音声用の activityStart/End は送らない（画像・テキストのみでは切断される）。
-        string prompt = string.IsNullOrEmpty(framePromptText)
-            ? "この絵を日本語で短く実況してください。"
-            : framePromptText;
+        string prompt = framePromptText ?? string.Empty;
         prompt = GeminiAudioResponse.WithAudioInstruction(prompt + ShortReplyInstruction());
         string turnJson = GeminiLiveMessages.ImageTurn(jpegBytes, prompt);
         replyWaitStarted = Time.realtimeSinceStartup;

@@ -119,13 +119,15 @@ Unityでは `WebCamTexture` から画像を取得し、長辺が設定値を超�
 5. **音声を再生する**
    `PlaybackPumpCoroutine` — 受信したPCMを共通の `PcmStreamPlayer` に渡し、音声スレッドで連続再生する。
 
-音声出力を確実に要求するため、設定と画像の指示には音声で返答する条件を付加します。文字起こしだけでターンが完了した場合は、画像を再送せず同じ回答の読み上げを1回だけ再要求します。それでも音声が届かなければエラーを表示し、再要求が20秒で完了しない場合は接続を閉じます。共通の指示ファイル自体は変更しません。
+音声出力を確実に要求するため、設定と画像の指示には音声で返答する条件を付加します。文字起こしだけでターンが完了した場合は、画像を再送せず同じ回答の読み上げを1回だけ再要求します。それでも音声が届かなければエラーを表示し、再要求が20秒で完了しない場合は接続を閉じます。音声出力の条件はアプリ側で付加します。
 
 ### Dashboard（[`VisionToSpeech.Dashboard.cs`](Script/VisionToSpeech.Dashboard.cs)）
 
 送信したJPEGをデコードして中央のプレビューに表示し、最新の返答・過去20件の履歴・音声波形・接続ランプを更新します。波形は再生中の音声データに連動します。送受信ログはスクロールでき、音声のチャンク数・受信量・最初の音声までの時間・ターン完了時間も表示します。
 
-「画像に添える指示」は次の送信から反映されます。System Instructionは接続時の設定なので、接続中は読み取り専用です。変更する場合は停止して `Assets/Common/SystemInstruction.txt` を編集し、再度Playしてください。
+指示はHierarchyのVisionToSpeechコンポーネントのInspectorで編集します。`System Instruction Text` が事前指示（次回Playから反映）、`Frame Prompt Text` が画像に添える指示（次の画像送信から反映）です。永続的な変更はPlay停止中に編集し、Sceneを保存してください。画面内の2つの指示欄は確認専用です。接続中の事前指示欄は、その接続に適用済みの内容を表示します。
+
+Inspectorの編集時と起動時に `Assets/1.VisionToSpeech/SystemInstruction.txt` と `Assets/1.VisionToSpeech/FramePrompt.txt` へ同じ文章を自動出力します。これらは確認・配布用で、直接編集しても読み込まれません。`Assets/Common/SystemInstruction.txt` はVisionToSpeechでは使いません。
 
 レイアウトはSceneに保存されています。Editor専用の `Tools > VisionToSpeech > Rebuild Dashboard` で同じ構成を再生成できます（現在のUI配置を置き換えます）。
 

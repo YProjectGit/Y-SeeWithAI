@@ -1002,10 +1002,10 @@ MonoBehaviour:
   m_CaretColor: {r: 0.19607843, g: 0.19607843, b: 0.19607843, a: 1}
   m_CustomCaretColor: 0
   m_SelectionColor: {r: 0.65882355, g: 0.80784315, b: 1, a: 0.7529412}
-  m_Text: 
+  m_Text: "\u30B3\u30F3\u30D1\u30AF\u30C8\u306A\u8FD4\u7B54\u3092\u5FC3\u304C\u3051\u3066\u3002\u7C21\u6F54\u306B20\u6587\u5B57\u4EE5\u5185\u3067\u3002"
   m_CaretBlinkRate: 0.85
   m_CaretWidth: 1
-  m_ReadOnly: 0
+  m_ReadOnly: 1
   m_RichText: 0
   m_GlobalFontAsset: {fileID: 11400000, guid: 124f16a11e613cd4ebc18e7a2bf87e90, type: 2}
   m_OnFocusSelectAll: 1
@@ -3000,7 +3000,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 539048061}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: f4688fdb7df04437aeb418b961361dc5, type: 3}
   m_Name: 
@@ -4833,19 +4833,19 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::VisionToSpeech
   modelName: gemini-3.1-flash-live-preview
   apiKeyRelativePath: Common/APIKey.txt
-  systemInstructionRelativePath: Common/SystemInstruction.txt
   voiceName: Kore
+  playbackBufferSeconds: 0.15
   playbackSampleRate: 24000
   maxSendLongSide: 768
   jpegQuality: 75
   streamIntervalSeconds: 1
   mediaResolution: MEDIA_RESOLUTION_MEDIUM
-  framePromptText: "\u3053\u306E\u753B\u50CF\u306B\u5199\u3063\u3066\u3044\u308B\u3082\u306E\u3092\u3001\u65E5\u672C\u8A9E\u3067\u77ED\u304F\u8AAC\u660E\u3057\u3066\u304F\u3060\u3055\u3044\u3002"
+  systemInstructionText: "\u30B3\u30F3\u30D1\u30AF\u30C8\u306A\u8FD4\u7B54\u3092\u5FC3\u304C\u3051\u3066\u3002\u7C21\u6F54\u306B20\u6587\u5B57\u4EE5\u5185\u3067\u3002"
+  framePromptText: "\u3053\u306E\u753B\u50CF\u306E\u4E2D\u306E\u4E3B\u305F\u308B\u72B6\u6CC1\u3092\u3001\u65E5\u672C\u8A9E20\u6587\u5B57\u7A0B\u5EA6\u3067\u77ED\u304F\u8AAC\u660E\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u540C\u3058\u3053\u3068\u3092\u7E70\u308A\u8FD4\u3055\u305A\u306B\u3001\u5909\u5316\u3092\u5B9F\u6CC1\u3057\u3066\u304F\u3060\u3055\u3044\u3002"
   systemInstructionField: {fileID: 147983101}
   recordHintText: {fileID: 2053043869}
   streamModeButton: {fileID: 571116193}
   webcamPreview: {fileID: 1712149578}
-  statusText: {fileID: 0}
   setupHeaderText: {fileID: 710354608}
   outboundLogText: {fileID: 1449283357}
   outboundStatusText: {fileID: 192939803}
@@ -5207,10 +5207,10 @@ MonoBehaviour:
   m_CaretColor: {r: 0.19607843, g: 0.19607843, b: 0.19607843, a: 1}
   m_CustomCaretColor: 0
   m_SelectionColor: {r: 0.65882355, g: 0.80784315, b: 1, a: 0.7529412}
-  m_Text: "\u3053\u306E\u753B\u50CF\u306B\u5199\u3063\u3066\u3044\u308B\u3082\u306E\u3092\u3001\u65E5\u672C\u8A9E\u3067\u77ED\u304F\u8AAC\u660E\u3057\u3066\u304F\u3060\u3055\u3044\u3002"
+  m_Text: "\u3053\u306E\u753B\u50CF\u306E\u4E2D\u306E\u4E3B\u305F\u308B\u72B6\u6CC1\u3092\u3001\u65E5\u672C\u8A9E20\u6587\u5B57\u7A0B\u5EA6\u3067\u77ED\u304F\u8AAC\u660E\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u540C\u3058\u3053\u3068\u3092\u7E70\u308A\u8FD4\u3055\u305A\u306B\u3001\u5909\u5316\u3092\u5B9F\u6CC1\u3057\u3066\u304F\u3060\u3055\u3044\u3002"
   m_CaretBlinkRate: 0.85
   m_CaretWidth: 1
-  m_ReadOnly: 0
+  m_ReadOnly: 1
   m_RichText: 0
   m_GlobalFontAsset: {fileID: 11400000, guid: 124f16a11e613cd4ebc18e7a2bf87e90, type: 2}
   m_OnFocusSelectAll: 1
@@ -5478,7 +5478,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "\u200B"
+  m_text: "\u30B3\u30F3\u30D1\u30AF\u30C8\u306A\u8FD4\u7B54\u3092\u5FC3\u304C\u3051\u3066\u3002\u7C21\u6F54\u306B20\u6587\u5B57\u4EE5\u5185\u3067\u3002\u200B"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 124f16a11e613cd4ebc18e7a2bf87e90, type: 2}
   m_sharedMaterial: {fileID: -1564414408837547503, guid: 124f16a11e613cd4ebc18e7a2bf87e90, type: 2}
@@ -5615,7 +5615,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "\u9001\u4FE1\u306E\u305F\u3073\u306B\u753B\u50CF\u3092\u66F4\u65B0"
+  m_text: "Inspector\u3067\u7DE8\u96C6 / \u6B21\u306E\u753B\u50CF\u9001\u4FE1\u304B\u3089\u53CD\u6620"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 124f16a11e613cd4ebc18e7a2bf87e90, type: 2}
   m_sharedMaterial: {fileID: -1564414408837547503, guid: 124f16a11e613cd4ebc18e7a2bf87e90, type: 2}
@@ -6392,7 +6392,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "System Instruction  /  \u5909\u66F4\u306F\u6B21\u56DE\u63A5\u7D9A\u6642\u306B\u53CD\u6620"
+  m_text: "\u4E8B\u524D\u6307\u793A / Inspector\u3067\u7DE8\u96C6\u30FB\u6B21\u56DEPlay\u304B\u3089\u53CD\u6620"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 124f16a11e613cd4ebc18e7a2bf87e90, type: 2}
   m_sharedMaterial: {fileID: -1564414408837547503, guid: 124f16a11e613cd4ebc18e7a2bf87e90, type: 2}
@@ -6529,7 +6529,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "\u3053\u306E\u753B\u50CF\u306B\u5199\u3063\u3066\u3044\u308B\u3082\u306E\u3092\u3001\u65E5\u672C\u8A9E\u3067\u77ED\u304F\u8AAC\u660E\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u200B"
+  m_text: "\u3053\u306E\u753B\u50CF\u306E\u4E2D\u306E\u4E3B\u305F\u308B\u72B6\u6CC1\u3092\u3001\u65E5\u672C\u8A9E20\u6587\u5B57\u7A0B\u5EA6\u3067\u77ED\u304F\u8AAC\u660E\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u540C\u3058\u3053\u3068\u3092\u7E70\u308A\u8FD4\u3055\u305A\u306B\u3001\u5909\u5316\u3092\u5B9F\u6CC1\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u200B"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 124f16a11e613cd4ebc18e7a2bf87e90, type: 2}
   m_sharedMaterial: {fileID: -1564414408837547503, guid: 124f16a11e613cd4ebc18e7a2bf87e90, type: 2}
@@ -11389,6 +11389,10 @@ PrefabInstance:
     - target: {fileID: 800000000, guid: 23c07aa884179454b889e6cdf2ade92b, type: 3}
       propertyPath: m_Name
       value: yFullScreen
+      objectReference: {fileID: 0}
+    - target: {fileID: 800000001, guid: 23c07aa884179454b889e6cdf2ade92b, type: 3}
+      propertyPath: fullScreenOnPlay
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 800000002, guid: 23c07aa884179454b889e6cdf2ade92b, type: 3}
       propertyPath: m_LocalPosition.x

@@ -16,7 +16,7 @@
 
 - ### 変化に応じた自動送信
 
-  描き足されたことを検知し、操作の途中でAIから反応を受け取る仕組みを学びます。
+  描き足されたことを検知し、1ストロークを描き終えたところでAIから反応を受け取る仕組みを学びます。
 
 <br/>
 
@@ -26,7 +26,7 @@
 
 APIキーは `Assets/Common/APIKey.txt` に設定してください。取得方法は [前回のWorkshop資料](https://scrapbox.io/y-project-cosense/UnityWorkshop_-_Gemini_API_編)を参照してください。
 
-Projectウィンドウで `Assets/2.ScreenToSpeech/ScreenToSpeech.unity` を開き、Playしてください。
+Projectウィンドウで `Assets/2.ScreenToSpeech/ScreenToSpeech.unity` を開き、Playしてください。Unity EditorのPlay中は **F12** でGame Viewの全画面表示を切り替えられます（yFullScreen）。
 
 画面左側は描画と小さな返答字幕、右側は実際に送ったJPEG・送受信ログ・設定要約です。ログには送信番号、容量、音声開始までの時間、音声受信量、完了時間を表示します。描画後も送信画像は次の送信まで保持されます。
 
@@ -87,17 +87,17 @@ AIに見せる画像は、カメラで撮った写真に限りません。**ア�
 
 1のデモと同じ形式です。`data` には描画パッドのJPEGをBase64にした文字列が入ります。**画像の取得元を変えても、APIへの送信方法は共通です。**
 
-### 描き途中の変化を送る
+### 1ストロークの終了時に送る
 
 毎フレーム送ると、同じ絵を何度も送ったり、前の返答が来る前に次の入力が重なったりします。このデモでは、次の条件を確認してから送ります。
 
 - **`HasInk`** — 紙に線が描かれている。
-- **`IsDirty`** — 前回送信してから描き足されている。
+- **`HasCompletedStroke`** — 前回送信後にストロークが終了し、現在は描画していない。
 - **`isTurnBusy` がfalse** — 前のターンが完了している。
 
 送信すると `MarkClean` で「送信済み」にし、次に描き足されたら再び `IsDirty` がtrueになります。「消す」で白紙に戻したあとは、新たに描くまで画像を送りません。
 
-確認の間隔は初期値で約1秒です。前の返答が完了していなければ待つため、一定速度で返答が続くとは限りません。応答を待つ間も絵を描けます。
+ポインタを離して1ストロークが終了した時点で送信します。描画中は送信しません。前の返答や音声再生が続いている場合は、その完了後に最新の絵を送ります。待機中に次のストロークを描き始めた場合は、そのストロークの終了まで待ちます。複数のストロークが完了している場合も、未送信の最新状態を1回だけ送ります。「消す」で送信待ちも取り消します。
 
 ### 実況の指示と音声の返答
 
@@ -105,7 +105,9 @@ AIに見せる画像は、カメラで撮った写真に限りません。**ア�
 
 音声入力用の `activityStart` / `activityEnd` は使いません。1のデモと同じく、画像とテキストだけの入力で起きる切断と、画像の認識前に回答する競合を避けるため、1つのターンにまとめています。
 
-Inspectorの **System Instruction Text** は、AIの役割や話し方を決める事前指示です。接続時のSetupで送ります。**Frame Prompt Text** は、画像を送るたびに添える指示です。
+Inspectorの **System Instruction Text** は、AIの役割や話し方を決める事前指示です。接続時のSetupで送ります。**Frame Prompt Text** は、画像を送るたびに添える指示です。どちらも改行できるテキストエリアで編集します。画面右側の送信画像と送受信ログの間にも、同じ文章を確認専用で表示します。長文はスクロールでき、接続中の事前指示欄は、その接続に適用済みの文章を表示します。永続的な変更はPlay停止中に行い、Sceneを保存してください。
+
+Inspectorの編集時と起動時に `Assets/2.ScreenToSpeech/SystemInstruction.txt` と `Assets/2.ScreenToSpeech/FramePrompt.txt` へ同じ文章を自動出力します。これらは確認・配布用で、直接編集しても読み込まれません。音声出力とResponse Character Limitの条件はアプリ側で付加します。
 
 返答はPCMという音声データで届き、`AudioSource` で再生します。字幕には、Setupの `outputAudioTranscription` で有効にした返答の文字起こしを表示します。
 
@@ -119,7 +121,7 @@ Inspectorの **System Instruction Text** は、AIの役割や話し方を決め�
 
 通信と実況の本体です。接続 → 描画の変化を確認 → 画像送信 → 音声・字幕の表示の順に追ってください。
 
-通信には **ClientWebSocket** を使います。受信はバックグラウンドで行い、UIや音声再生の操作はメインスレッドのキューへ渡します。送信間隔や応答を待つ処理には **コルーチン** を使い、待っている間も描画処理を続けられるようにしています。
+通信には **ClientWebSocket** を使います。受信はバックグラウンドで行い、UIや音声再生の操作はメインスレッドのキューへ渡します。ストロークの終了や応答を待つ処理には **コルーチン** を使い、待っている間も描画処理を続けられるようにしています。
 
 1. **Liveセッションに接続する**
    `ConnectLiveSessionCoroutine` → `BuildSetupJson` — 事前指示と音声の設定を送り、接続完了を待つ。
@@ -143,7 +145,7 @@ Inspectorの **System Instruction Text** は、AIの役割や話し方を決め�
 2. **画像に線を描く**
    `StampLine` / `Stamp` — 画素を書き換え、描画済み・変更ありの状態を記録する。
 3. **描画の状態を渡す**
-   `CanvasTexture` / `HasInk` / `IsDirty` — 通信側へ画像と状態を公開する。`Clear` は白紙へ戻し、`MarkClean` は送信済みにする。
+   `CanvasTexture` / `HasInk` / `IsDirty` / `IsDrawing` / `HasCompletedStroke` — 通信側へ画像と状態を公開する。`Clear` は白紙へ戻し、`MarkClean` は送信済みにする。
 
 ### 共通ライブラリ（`Assets/Common/Script/`）
 

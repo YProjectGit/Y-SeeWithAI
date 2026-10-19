@@ -13,6 +13,8 @@ public partial class ScreenToSpeech
     public Image connectionLamp;
     public ScrollRect logScroll;
     public RectTransform[] waveformBars;
+    public TMP_Text systemInstructionDisplay, framePromptDisplay;
+    string appliedSystemInstruction;
     Texture2D sentTexture;
     int sentCount;
     long turnAudioBytes;
@@ -40,8 +42,21 @@ public partial class ScreenToSpeech
         if (sentInfoText != null)
             sentInfoText.text = "まだ送信していません";
         if (responseFrameText != null)
-            responseFrameText.text = "描くと自動で送信します";
+            responseFrameText.text = "1ストローク描き終えると送信します";
         UpdateDashboard();
+        Canvas.ForceUpdateCanvases();
+        if (systemInstructionDisplay != null)
+            systemInstructionDisplay.GetComponentInParent<ScrollRect>().verticalNormalizedPosition = 1f;
+        if (framePromptDisplay != null)
+            framePromptDisplay.GetComponentInParent<ScrollRect>().verticalNormalizedPosition = 1f;
+    }
+
+    public void RefreshInstructionDisplay()
+    {
+        if (systemInstructionDisplay != null)
+            systemInstructionDisplay.text = appliedSystemInstruction ?? systemInstructionText ?? string.Empty;
+        if (framePromptDisplay != null)
+            framePromptDisplay.text = framePromptText ?? string.Empty;
     }
     void RecordSentFrame(byte[] jpeg, int width, int height)
     {
@@ -109,6 +124,7 @@ public partial class ScreenToSpeech
         if (Time.unscaledTime < nextRefresh)
             return;
         nextRefresh = Time.unscaledTime + .1f;
+        RefreshInstructionDisplay();
         bool connected = isConnected && setupComplete;
         if (statusText != null)
             statusText.text = dashboardError != null ? "エラー" : playing ? "話しています"
@@ -121,10 +137,13 @@ public partial class ScreenToSpeech
         if (connectionLamp != null)
             connectionLamp.color = connected ? new Color(.23f, .85f, .55f) : Color.gray;
         if (sentStateText != null)
-            sentStateText.text = dashboardError != null ? dashboardError : drawingPad != null && drawingPad.IsDirty ? "描画の変更あり · 次の送信待ち" : isTurnBusy ? "返答待ち" : sentCount > 0 ? "最新の描画を送信済み" : "描くと自動送信";
+            sentStateText.text = dashboardError != null ? dashboardError
+                : drawingPad != null && drawingPad.IsDrawing ? "描画中 · 離すと送信"
+                : drawingPad != null && drawingPad.HasCompletedStroke ? "ストローク完了 · 送信待ち"
+                : isTurnBusy ? "返答待ち" : sentCount > 0 ? "最新の描画を送信済み" : "1ストローク終了時に送信";
         if (totalsText != null)
             totalsText.text = $"送信 {sentCount} 枚    音声 {response.AudioChunks} chunks";
         if (settingsText != null)
-            settingsText.text = $"{voiceName}  ·  AUDIO / {playbackSampleRate / 1000} kHz  ·  返答 {responseCharacterLimit}文字以内\n自動送信 {interpretIntervalSeconds:0.#}秒間隔 · 返答と再生の完了を待機";
+            settingsText.text = $"{voiceName}  ·  AUDIO / {playbackSampleRate / 1000} kHz  ·  返答 {responseCharacterLimit}文字以内\n1ストローク終了時に送信 · 返答と再生の完了を待機";
     }
 }

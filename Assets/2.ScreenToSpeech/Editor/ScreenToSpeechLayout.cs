@@ -35,7 +35,7 @@ public static class ScreenToSpeechLayout
         ui.Fill(root, new Color(.075f, .08f, .10f));
         var left = ui.Box("DrawingPanel", root, 24, 20, 1160, 1040);
         ui.Text("描画", left, 22, 18, 180, 42, 32);
-        ui.Text("描き足すと自動送信", left, 140, 28, 600, 30, 21, Muted);
+        ui.Text("1ストローク終了時に送信", left, 140, 28, 600, 30, 21, Muted);
         demo.clearButton = ui.Button("消す", left, 1010, 16, 128, 48, 24, Well);
         var pad = UnityEngine.Object.Instantiate(demo.drawingPad, left);
         pad.name = "DrawingPad";
@@ -52,7 +52,7 @@ public static class ScreenToSpeechLayout
         pad.paperColor = Color.white;
         pad.GetComponent<RawImage>().color = Color.white;
         demo.drawingPad = pad;
-        ui.Text("ドラッグして描く", left, 22, 833, 1100, 28, 19, Muted);
+        ui.Text("ドラッグして描く · 離すと送信", left, 22, 833, 1100, 28, 19, Muted);
         var response = ui.Box("Response", left, 20, 875, 1120, 145, Well);
         demo.statusText = ui.Text("描いてください", response, 142, 20, 900, 30, 22, Blue);
         demo.captionText = ui.Text("描くと、ここに短い返答が表示されます。", response, 22, 62, 1076, 42, 26);
@@ -80,20 +80,71 @@ public static class ScreenToSpeechLayout
         demo.sentAspect.aspectRatio = 1.5f;
         demo.sentFramePreview.enabled = false;
         demo.sentInfoText = ui.Text("まだ送信していません", sent, 22, 408, 648, 50, 19, Muted);
-        demo.sentStateText = ui.Text("描くと自動送信", sent, 22, 461, 648, 25, 18, Blue);
+        demo.sentStateText = ui.Text("1ストローク終了時に送信", sent, 22, 461, 648, 25, 18, Blue);
         var logs = ui.Box("LogPanel", root, 1204, 524, 692, 424);
         ui.Text("送受信ログ", logs, 22, 18, 260, 40, 30);
         demo.totalsText = ui.Text("送信 0 枚    音声 0 chunks", logs, 280, 27, 390, 30, 19, Muted, TextAlignmentOptions.MidlineRight);
         demo.logText = ui.ScrollText(logs, "Events", 22, 76, 648, 326, 21, out demo.logScroll);
         demo.logText.text = "接続するとログが表示されます";
         var settings = ui.Box("Settings", root, 1204, 966, 692, 94);
-        demo.settingsText = ui.Text("Kore · AUDIO / 24 kHz · 返答40文字以内\n自動送信 1秒間隔 · 返答と再生の完了を待機", settings, 22, 18, 648, 62, 20, Muted);
+        demo.settingsText = ui.Text("Kore · AUDIO / 24 kHz · 返答40文字以内\n1ストローク終了時に送信 · 返答と再生の完了を待機", settings, 22, 18, 648, 62, 20, Muted);
         demo.responseCharacterLimit = 40;
-        demo.systemInstructionText = demo.systemInstructionText.Replace("返答は1〜2文にしてください。", "返答は1文にしてください。");
         foreach (var child in old)
             Undo.DestroyObjectImmediate(child);
+        AddInstructionPanel();
         EditorUtility.SetDirty(demo);
         EditorSceneManager.MarkSceneDirty(scene);
         Canvas.ForceUpdateCanvases();
+    }
+
+    // 既存の描画・字幕を維持し、右列に確認専用の指示欄を追加する。
+    [MenuItem("Tools/ScreenToSpeech/Add Instruction Panel")]
+    public static void AddInstructionPanel()
+    {
+        var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+        if (Application.isPlaying || scene.path != "Assets/2.ScreenToSpeech/ScreenToSpeech.unity")
+            throw new InvalidOperationException("Open ScreenToSpeech in EditMode first.");
+        var demo = UnityEngine.Object.FindFirstObjectByType<ScreenToSpeech>();
+        var root = demo.sentInfoText.transform.parent.parent;
+        ui = new DashboardLayoutElements(demo.captionText.font);
+        Undo.RecordObject(demo, "Add instruction panel");
+        var sent = (RectTransform)demo.sentInfoText.transform.parent;
+        Place(sent, 1204, 20, 692, 410);
+        Place((RectTransform)sent.Find("SentWell"), 22, 78, 648, 242);
+        Place(demo.sentInfoText.rectTransform, 22, 332, 648, 50);
+        Place(demo.sentStateText.rectTransform, 22, 385, 648, 25);
+
+        var previous = root.Find("InstructionPanel");
+        if (previous != null)
+            Undo.DestroyObjectImmediate(previous.gameObject);
+        var panel = ui.Box("InstructionPanel", root, 1204, 448, 692, 300);
+        Undo.RegisterCreatedObjectUndo(panel.gameObject, "Add instruction panel");
+        ui.Text("事前指示", panel, 22, 14, 300, 28, 22);
+        ui.Text("Inspectorで編集 / 接続時に適用", panel, 282, 17, 388, 26, 17, Muted, TextAlignmentOptions.MidlineRight);
+        demo.systemInstructionDisplay = ui.ScrollText(panel, "SystemInstruction", 22, 50, 648, 118, 18, out var systemScroll);
+        demo.systemInstructionDisplay.richText = false;
+        ui.Text("画像に添える指示", panel, 22, 178, 380, 28, 22);
+        demo.framePromptDisplay = ui.ScrollText(panel, "FramePrompt", 22, 212, 648, 76, 18, out var frameScroll);
+        demo.framePromptDisplay.richText = false;
+        demo.RefreshInstructionDisplay();
+        systemScroll.verticalNormalizedPosition = frameScroll.verticalNormalizedPosition = 1f;
+
+        var logs = (RectTransform)demo.logText.transform.parent.parent.parent;
+        Place(logs, 1204, 766, 692, 182);
+        var events = demo.logScroll.GetComponent<RectTransform>();
+        Place(events, 22, 70, 648, 90);
+        Place(demo.logScroll.viewport, 10, 8, 616, 74);
+        Place(demo.logScroll.verticalScrollbar.GetComponent<RectTransform>(), 636, 8, 5, 74);
+        EditorUtility.SetDirty(demo);
+        EditorSceneManager.MarkSceneDirty(scene);
+        Canvas.ForceUpdateCanvases();
+        systemScroll.verticalNormalizedPosition = frameScroll.verticalNormalizedPosition = 1f;
+    }
+
+    static void Place(RectTransform rect, float x, float y, float width, float height)
+    {
+        Undo.RecordObject(rect, "Arrange instruction panel");
+        rect.anchoredPosition = new Vector2(x, -y);
+        rect.sizeDelta = new Vector2(width, height);
     }
 }

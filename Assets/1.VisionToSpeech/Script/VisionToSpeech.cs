@@ -33,7 +33,6 @@ public partial class VisionToSpeech : MonoBehaviour
 
     public string modelName = "gemini-3.1-flash-live-preview"; // Live モデル名（Setup の models/ 以下）
     public string apiKeyRelativePath = "Common/APIKey.txt"; // Assets/ からの相対パス
-    public string systemInstructionRelativePath = "Common/SystemInstruction.txt"; // 事前指示ファイル
     public string voiceName = "Kore"; // Setup の prebuilt 声色名
     [Range(0.05f, 0.5f)] public float playbackBufferSeconds = 0.15f; // 通信の揺れを吸収する先読み秒数
     public int playbackSampleRate = 24000; // 受信 PCM の想定サンプルレート（Hz）
@@ -41,6 +40,12 @@ public partial class VisionToSpeech : MonoBehaviour
     public int jpegQuality = 75; // EncodeToJPG の品質（1〜100）
     public float streamIntervalSeconds = 1f; // ストリーミング時の送信間隔（約1 FPS）
     public string mediaResolution = "MEDIA_RESOLUTION_MEDIUM"; // generationConfig の mediaResolution
+    [Header("指示 / Inspectorが編集元")]
+    [TextArea(3, 6)]
+    [Tooltip("接続時に適用します。変更後はPlayを再開してください。テキストファイルは自動出力です。")]
+    public string systemInstructionText = "プレーンテキストで返してください。コンパクトな返答を心がけて。簡潔に100文字以内で。";
+    [TextArea(2, 5)]
+    [Tooltip("画像送信のたびに適用します。テキストファイルは自動出力です。")]
     public string framePromptText =
         "この画像に写っているものを、日本語で短く説明してください。"; // フレームと一緒に送る指示
 
@@ -81,7 +86,7 @@ public partial class VisionToSpeech : MonoBehaviour
     Coroutine streamLoopCoroutine; // ストリーミング用ループ
     long outboundTotalBytes; // 送信累計バイト
     int outboundFrameCount; // 送信フレーム数
-    DateTime systemInstructionFileWriteTimeUtc; // SystemInstruction.txt 同期用
+    string appliedSystemInstruction; // 現在の接続で適用した事前指示
     TMP_Text streamModeButtonLabel; // ボタン上のラベル
     Image streamModeButtonImage; // ボタン色
     float replyWaitStarted = -1f; // 送信完了（turnComplete）時刻。未計測は -1
@@ -97,11 +102,8 @@ public partial class VisionToSpeech : MonoBehaviour
     void Start()
     {
         LoadApiKey();
-        LoadSystemInstructionFromFile();
-        if (systemInstructionField != null)
-        {
-            systemInstructionField.onEndEdit.AddListener(OnSystemInstructionEndEdit);
-        }
+        ExportInstructionFiles();
+        RefreshInstructionDisplay();
 
         EnsurePlaybackAudioSource();
         pcmPlayer = playbackAudioSource.GetComponent<PcmStreamPlayer>();
@@ -228,8 +230,10 @@ public partial class VisionToSpeech : MonoBehaviour
     // Setup メッセージ（最初に1回だけ送るセッション設定）
     string BuildSetupJson()
     {
+        appliedSystemInstruction = systemInstructionText ?? string.Empty;
+        RefreshInstructionDisplay();
         return GeminiLiveMessages.Setup(modelName, voiceName, mediaResolution,
-            GeminiAudioResponse.WithAudioInstruction(GetSystemInstructionText()));
+            GeminiAudioResponse.WithAudioInstruction(appliedSystemInstruction));
     }
 
     // ----- Stream トグル -----
@@ -371,14 +375,11 @@ public partial class VisionToSpeech : MonoBehaviour
         if (isTurnBusy || IsAudioPending || !isConnected || !setupComplete)
             yield break;
         response.Begin();
-        SyncSystemInstructionBeforeSend();
         BeginDashboardTurn();
 
         // 画像と指示を同じターンに含め、画像の到着前に回答が始まる競合を防ぐ。
         // 音声用の activityStart/End は送らない（画像・テキストのみでは切断される）。
-        string prompt = string.IsNullOrEmpty(framePromptText)
-            ? "この画像を日本語で短く説明してください。"
-            : framePromptText;
+        string prompt = framePromptText ?? string.Empty;
         prompt = GeminiAudioResponse.WithAudioInstruction(prompt);
         string turnJson = GeminiLiveMessages.ImageTurn(jpegBytes, prompt);
         Task sendTask = SendTextAsync(turnJson);
@@ -708,82 +709,33 @@ public partial class VisionToSpeech : MonoBehaviour
         }
     }
 
-    string GetSystemInstructionFilePath()
+    // Inspectorの設定から出力する。ファイルや画面からの逆方向の読込は行わない。
+    public void ExportInstructionFiles()
     {
-        return Path.Combine(Application.dataPath, systemInstructionRelativePath);
+        WriteInstructionFile("1.VisionToSpeech/SystemInstruction.txt", systemInstructionText);
+        WriteInstructionFile("1.VisionToSpeech/FramePrompt.txt", framePromptText);
     }
 
-    void LoadSystemInstructionFromFile()
+    static void WriteInstructionFile(string relativePath, string text)
     {
-        if (systemInstructionField == null)
-        {
-            return;
-        }
-
-        string path = GetSystemInstructionFilePath();
-        if (!File.Exists(path))
-        {
-            systemInstructionField.text = string.Empty;
-            return;
-        }
-
-        systemInstructionField.text = File.ReadAllText(path);
-        systemInstructionFileWriteTimeUtc = File.GetLastWriteTimeUtc(path);
+        string path = Path.Combine(Application.dataPath, relativePath);
+        text = text ?? string.Empty;
+        if (!File.Exists(path) || File.ReadAllText(path) != text)
+            File.WriteAllText(path, text, new UTF8Encoding(false));
     }
 
-    // InputField の編集確定時
-    void OnSystemInstructionEndEdit(string _)
+    public void RefreshInstructionDisplay()
     {
-        SaveSystemInstructionFromField();
-    }
-
-    void SaveSystemInstructionFromField()
-    {
-        if (systemInstructionField == null)
+        if (systemInstructionField != null)
         {
-            return;
+            systemInstructionField.readOnly = true;
+            systemInstructionField.SetTextWithoutNotify(appliedSystemInstruction ?? systemInstructionText ?? string.Empty);
         }
-
-        string path = GetSystemInstructionFilePath();
-        string dir = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+        if (framePromptField != null)
         {
-            Directory.CreateDirectory(dir);
+            framePromptField.readOnly = true;
+            framePromptField.SetTextWithoutNotify(framePromptText ?? string.Empty);
         }
-
-        File.WriteAllText(path, systemInstructionField.text ?? string.Empty, new UTF8Encoding(false));
-        systemInstructionFileWriteTimeUtc = File.GetLastWriteTimeUtc(path);
-    }
-
-    void SyncSystemInstructionBeforeSend()
-    {
-        if (systemInstructionField == null)
-        {
-            return;
-        }
-
-        string path = GetSystemInstructionFilePath();
-        if (File.Exists(path))
-        {
-            DateTime write = File.GetLastWriteTimeUtc(path);
-            if (write > systemInstructionFileWriteTimeUtc && !systemInstructionField.isFocused)
-            {
-                systemInstructionField.text = File.ReadAllText(path);
-                systemInstructionFileWriteTimeUtc = write;
-            }
-        }
-
-        SaveSystemInstructionFromField();
-    }
-
-    string GetSystemInstructionText()
-    {
-        if (systemInstructionField == null || systemInstructionField.text == null)
-        {
-            return string.Empty;
-        }
-
-        return systemInstructionField.text.Trim();
     }
 
     // ----- メインスレッド橋渡し / 切断 -----
