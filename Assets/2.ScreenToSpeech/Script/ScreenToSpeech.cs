@@ -1,11 +1,11 @@
 // ScreenToSpeech.cs
 // 1.VisionToSpeech の姉妹デモ。WebCam ではなく、描画パッドの JPEG を Live API に送る。
-// 送信／受信のテキスト欄は出さず、紙・消す・状態・字幕だけの体験画面にする。
+// 左に描画と短い字幕、右に送信JPEGと簡潔な送受信ログを表示する。
 //
 // 上からの流れ:
 //   Start → APIキー・体験 UI・AudioSource・Live 接続（Setup）
 //   描く → dirty なら約1秒間隔で
-//     activityStart → JPEG → 短い実況指示 → activityEnd → 音声返答
+//     画像と実況指示を clientContent の1ターンにまとめて送信 → 音声返答
 //   受信 → serverContent の音声を再生キューへ / output transcription を字幕へ
 //   消す → 紙を白紙に（空の紙は送らない）
 
@@ -26,20 +26,22 @@ using UnityEngine.UI;
 /// <summary>
 /// Gemini Live API（WebSocket）で、描いている絵への解釈を声で返す。
 /// </summary>
-public class ScreenToSpeech : MonoBehaviour
+public partial class ScreenToSpeech : MonoBehaviour
 {
     // ===== インスペクタ: 設定 =====
 
     public string modelName = "gemini-3.1-flash-live-preview"; // Live モデル名（Setup の models/ 以下）
     public string apiKeyRelativePath = "Common/APIKey.txt"; // Assets/ からの相対パス
     public string voiceName = "Kore"; // Setup の prebuilt 声色名
+    [Range(0.05f, 0.5f)] public float playbackBufferSeconds = 0.15f; // 通信の揺れを吸収する先読み秒数
     public int playbackSampleRate = 24000; // 受信 PCM の想定サンプルレート（Hz）
     public int maxSendLongSide = 768; // 送信 JPEG の長辺上限（推奨解像度）
     public int jpegQuality = 75; // EncodeToJPG の品質（1〜100）
     public float interpretIntervalSeconds = 1f; // 自動送信の間隔（約1 FPS）
     public string mediaResolution = "MEDIA_RESOLUTION_MEDIUM"; // generationConfig の mediaResolution
     public string systemInstructionText =
-        "あなたは、人がいま描いている絵を見る実況者です。紙に見えている線や形を、日本語で短くやさしく話してください。途中の線でも、いま見えているものから推測してよいです。まだほとんど描かれていないときは、無理に物語を作らず、見えていることだけを言ってください。返答は1〜2文にしてください。"; // Setup の事前指示（画面には出さない）
+        "あなたは、人がいま描いている絵を見る実況者です。紙に見えている線や形を、日本語で短くやさしく話してください。途中の線でも、いま見えているものから推測してよいです。まだほとんど描かれていないときは、無理に物語を作らず、見えていることだけを言ってください。返答は1文にしてください。"; // Setup の事前指示（画面には出さない）
+    [Range(20, 100)] public int responseCharacterLimit = 40; // 音声と字幕の返答長を指示
     public string framePromptText =
         "このキャンバスに描かれている絵を、日本語で短く実況してください。"; // フレームと一緒に送る指示
 
@@ -61,10 +63,12 @@ public class ScreenToSpeech : MonoBehaviour
 
     bool setupComplete; // setupComplete 受信済みか
     bool isConnected; // ソケットが Open か
-    bool isTurnBusy; // 1ターン送信中（二重送信防止）
+    readonly GeminiResponseTurn response = new GeminiResponseTurn();
+    bool isTurnBusy => response.IsBusy;
+    bool IsAudioPending => !playbackPcmQueue.IsEmpty || (pcmPlayer != null && pcmPlayer.HasPendingAudio);
+    PcmStreamPlayer pcmPlayer;
     bool playbackCoroutineRunning; // 再生コルーチン稼働中か
-    string outputTranscriptBuffer; // 出力 transcription の蓄積
-    float replyWaitStarted = -1f; // 送信完了（activityEnd）時刻。未計測は -1
+    float replyWaitStarted = -1f; // 画像送信開始時刻。未計測は -1
 
     const string WsEndpoint =
         "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
@@ -79,8 +83,13 @@ public class ScreenToSpeech : MonoBehaviour
         LoadApiKey();
         EnsureRuntimeBasics();
         EnsurePlaybackAudioSource();
+        pcmPlayer = playbackAudioSource.GetComponent<PcmStreamPlayer>();
+        if (pcmPlayer == null)
+            pcmPlayer = playbackAudioSource.gameObject.AddComponent<PcmStreamPlayer>();
+        pcmPlayer.Initialize(playbackSampleRate, playbackBufferSeconds);
         WireClearButton();
         SetCaption(string.Empty);
+        InitializeDashboard();
 
         if (string.IsNullOrEmpty(apiKey))
         {
@@ -96,12 +105,15 @@ public class ScreenToSpeech : MonoBehaviour
     void Update()
     {
         DrainMainThreadActions();
+        UpdateDashboard();
     }
 
     // 終了時にソケットを解放する
     void OnDestroy()
     {
         CloseSocket(true);
+        if (sentTexture != null)
+            Destroy(sentTexture);
     }
 
     // ----- 接続（Setup） -----
@@ -166,41 +178,11 @@ public class ScreenToSpeech : MonoBehaviour
     // Setup メッセージ（最初に1回だけ送るセッション設定）
     string BuildSetupJson()
     {
-        StringBuilder sb = new StringBuilder(512);
-        sb.Append("{\"setup\":{");
-        sb.Append("\"model\":\"models/");
-        sb.Append(GeminiJson.Escape(modelName));
-        sb.Append("\",");
-
-        // クライアントが activityStart/End でターンを区切る（1 と同じ）
-        sb.Append("\"realtimeInputConfig\":{\"automaticActivityDetection\":{\"disabled\":true}},");
-        sb.Append("\"outputAudioTranscription\":{},");
-
-        string instruction = systemInstructionText != null ? systemInstructionText.Trim() : string.Empty;
-        if (!string.IsNullOrEmpty(instruction))
-        {
-            sb.Append("\"systemInstruction\":{\"parts\":[{\"text\":\"");
-            sb.Append(GeminiJson.Escape(instruction));
-            sb.Append("\"}]},");
-        }
-
-        sb.Append("\"generationConfig\":{");
-        sb.Append("\"responseModalities\":[\"AUDIO\"],");
-        if (!string.IsNullOrEmpty(mediaResolution))
-        {
-            // GenerationConfig のフィールド。setup 直下に置くとサーバが切断する
-            sb.Append("\"mediaResolution\":\"");
-            sb.Append(GeminiJson.Escape(mediaResolution));
-            sb.Append("\",");
-        }
-
-        sb.Append("\"speechConfig\":{\"voiceConfig\":{\"prebuiltVoiceConfig\":{\"voiceName\":\"");
-        sb.Append(GeminiJson.Escape(voiceName));
-        sb.Append("\"}}}");
-        sb.Append('}'); // generationConfig
-        sb.Append("}}"); // setup + root
-        return sb.ToString();
+        return GeminiLiveMessages.Setup(modelName, voiceName, mediaResolution,
+            GeminiAudioResponse.WithAudioInstruction(systemInstructionText + ShortReplyInstruction()));
     }
+
+    string ShortReplyInstruction() => $"\n返答は日本語で{Mathf.Clamp(responseCharacterLimit, 20, 100)}文字以内、短い1文だけにしてください。前置きや質問を付けず、最も目立つ特徴だけを話してください。";
 
     // ----- 自動送信（描きながらの解釈） -----
 
@@ -216,7 +198,7 @@ public class ScreenToSpeech : MonoBehaviour
                 yield return null;
             }
 
-            if (!isConnected || !setupComplete || isTurnBusy)
+            if (!isConnected || !setupComplete || isTurnBusy || IsAudioPending)
             {
                 continue;
             }
@@ -230,10 +212,10 @@ public class ScreenToSpeech : MonoBehaviour
         }
     }
 
-    // 1ターン: activityStart → JPEG → テキスト指示 → activityEnd
+    // 画像とテキストを1つの clientContent に入れ、turnComplete で返答を求める
     IEnumerator SendFrameTurnCoroutine()
     {
-        if (isTurnBusy)
+        if (isTurnBusy || IsAudioPending)
         {
             yield break;
         }
@@ -253,34 +235,31 @@ public class ScreenToSpeech : MonoBehaviour
             yield break;
         }
 
-        isTurnBusy = true;
+        response.Begin();
+        dashboardError = null;
+        turnAudioBytes = 0;
         drawingPad.MarkClean();
-        outputTranscriptBuffer = string.Empty;
         ClearPlaybackQueue();
         SetStatus("見てます…");
 
-        yield return StartCoroutine(SendJsonCoroutine("{\"realtimeInput\":{\"activityStart\":{}}}"));
-
-        string b64 = Convert.ToBase64String(jpegBytes);
-        string videoJson =
-            "{\"realtimeInput\":{\"video\":{\"mimeType\":\"image/jpeg\",\"data\":\""
-            + b64
-            + "\"}}}";
-        yield return StartCoroutine(SendJsonCoroutine(videoJson));
-
-        // 画像だけだと応答のきっかけが弱いことがあるので、短い指示テキストも同じターンで送る
-        // 3.1 Live は会話中の clientContent を拒否するので realtimeInput.text を使う
+        // 画像と指示を同じターンに含め、画像の到着前に回答が始まる競合を防ぐ。
+        // 音声用の activityStart/End は送らない（画像・テキストのみでは切断される）。
         string prompt = string.IsNullOrEmpty(framePromptText)
             ? "この絵を日本語で短く実況してください。"
             : framePromptText;
-        string textJson =
-            "{\"realtimeInput\":{\"text\":\""
-            + GeminiJson.Escape(prompt)
-            + "\"}}";
-        yield return StartCoroutine(SendJsonCoroutine(textJson));
+        prompt = GeminiAudioResponse.WithAudioInstruction(prompt + ShortReplyInstruction());
+        string turnJson = GeminiLiveMessages.ImageTurn(jpegBytes, prompt);
+        replyWaitStarted = Time.realtimeSinceStartup;
+        Task send = SendTextAsync(turnJson);
+        while (!send.IsCompleted)
+            yield return null;
+        if (send.IsFaulted || send.IsCanceled)
+        {
+            ShowError("画像の送信に失敗しました。");
+            yield break;
+        }
+        RecordSentFrame(jpegBytes, width, height);
 
-        yield return StartCoroutine(SendJsonCoroutine("{\"realtimeInput\":{\"activityEnd\":{}}}"));
-        replyWaitStarted = Time.realtimeSinceStartup; // 送信完了。返信までの計測用
         Debug.Log("[ScreenToSpeech] 送信 " + width + "x" + height + " " + jpegBytes.Length + "B");
     }
 
@@ -329,25 +308,6 @@ public class ScreenToSpeech : MonoBehaviour
 
     // ----- 送受信 -----
 
-    IEnumerator SendJsonCoroutine(string json)
-    {
-        if (socket == null || socket.State != WebSocketState.Open)
-        {
-            yield break;
-        }
-
-        Task task = SendTextAsync(json);
-        while (!task.IsCompleted)
-        {
-            yield return null;
-        }
-
-        if (task.IsFaulted)
-        {
-            EnqueueMain(() => ShowError("送信エラー: " + task.Exception.GetBaseException().Message));
-        }
-    }
-
     async Task SendTextAsync(string json)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(json);
@@ -374,10 +334,15 @@ public class ScreenToSpeech : MonoBehaviour
                             .ConfigureAwait(false);
                         if (result.MessageType == WebSocketMessageType.Close)
                         {
+                            string closeReason = result.CloseStatusDescription;
                             EnqueueMain(() =>
                             {
                                 isConnected = false;
-                                SetStatus("切断されました");
+                                response.Cancel();
+                                if (!string.IsNullOrEmpty(closeReason))
+                                    ShowError("切断: " + closeReason);
+                                else
+                                    SetStatus("切断されました");
                             });
                             return;
                         }
@@ -401,113 +366,64 @@ public class ScreenToSpeech : MonoBehaviour
         }
     }
 
-    // サーバ JSON を種別ごとに振り分ける（教材用の最小パーサ）
+    // 共通パーサで受信イベントを読み、デモ固有の処理へ渡す。
     void HandleServerMessage(string json)
     {
-        if (string.IsNullOrEmpty(json))
+        var message = GeminiLiveMessages.Parse(json);
+        if (message.SetupComplete)
         {
+            EnqueueMain(() => { setupComplete = true; AddLog("接続", "セッション準備完了"); });
             return;
         }
-
-        if (json.IndexOf("\"setupComplete\"", StringComparison.Ordinal) >= 0)
+        foreach (var pcm in message.Audio)
         {
-            EnqueueMain(() => { setupComplete = true; });
-            return;
-        }
-
-        TryExtractAndEnqueueAudio(json);
-
-        if (json.IndexOf("\"outputTranscription\"", StringComparison.Ordinal) >= 0)
-        {
-            string t = GeminiJsonScan.NestedTextAfterKey(json, "outputTranscription");
-            if (!string.IsNullOrEmpty(t))
+            playbackPcmQueue.Enqueue(pcm);
+            EnqueueMain(() =>
             {
-                EnqueueMain(() => OnOutputTranscription(t));
-            }
+                response.AddAudio();
+                RecordAudio(pcm.Length);
+            });
         }
-
-        if (json.IndexOf("\"turnComplete\":true", StringComparison.Ordinal) >= 0
-            || json.IndexOf("\"turnComplete\": true", StringComparison.Ordinal) >= 0)
-        {
+        if (!string.IsNullOrEmpty(message.Transcript))
+            EnqueueMain(() => OnOutputTranscription(message.Transcript));
+        if (message.TurnComplete)
             EnqueueMain(OnTurnComplete);
-        }
-
-        if (json.IndexOf("\"interrupted\":true", StringComparison.Ordinal) >= 0)
-        {
+        if (message.Interrupted)
             EnqueueMain(ClearPlaybackQueue);
-        }
-    }
-
-    void TryExtractAndEnqueueAudio(string json)
-    {
-        const string marker = "\"data\":\"";
-        if (json.IndexOf("\"inlineData\"", StringComparison.Ordinal) < 0
-            && json.IndexOf("\"inline_data\"", StringComparison.Ordinal) < 0)
-        {
-            return;
-        }
-
-        if (json.IndexOf("audio", StringComparison.OrdinalIgnoreCase) < 0)
-        {
-            return;
-        }
-
-        int searchFrom = 0;
-        while (true)
-        {
-            int dataIndex = json.IndexOf(marker, searchFrom, StringComparison.Ordinal);
-            if (dataIndex < 0)
-            {
-                break;
-            }
-
-            int valueStart = dataIndex + marker.Length;
-            int valueEnd = json.IndexOf('"', valueStart);
-            if (valueEnd < 0)
-            {
-                break;
-            }
-
-            string b64 = json.Substring(valueStart, valueEnd - valueStart);
-            searchFrom = valueEnd + 1;
-            if (b64.Length < 64)
-            {
-                continue;
-            }
-
-            try
-            {
-                byte[] pcm = Convert.FromBase64String(b64);
-                if (pcm.Length >= 2)
-                {
-                    playbackPcmQueue.Enqueue(pcm);
-                }
-            }
-            catch (FormatException)
-            {
-                // 非 Base64 は無視
-            }
-        }
     }
 
     void OnOutputTranscription(string fragment)
     {
-        outputTranscriptBuffer = (outputTranscriptBuffer ?? string.Empty) + fragment;
-        SetCaption(outputTranscriptBuffer.Trim());
+        response.AppendTranscript(fragment);
+        SetCaption(response.Transcript.Trim());
         SetStatus("話しています");
     }
 
     // ターン完了: ビジー解除。字幕は残す
     void OnTurnComplete()
     {
+        var completion = response.Complete();
+        if (completion == GeminiResponseTurn.Completion.Ignored)
+            return;
+        if (completion == GeminiResponseTurn.Completion.RetryAudio)
+        {
+            StartCoroutine(RetryAudioCoroutine());
+            return;
+        }
+        if (completion == GeminiResponseTurn.Completion.Failed)
+        {
+            ShowError(GeminiResponseTurn.MissingAudioError);
+            return;
+        }
+        RecordTurnComplete();
         if (replyWaitStarted >= 0f)
         {
             ResponseTime.Log("合計", replyWaitStarted);
             replyWaitStarted = -1f;
         }
 
-        isTurnBusy = false;
-        if (playbackPcmQueue.IsEmpty && (playbackAudioSource == null || !playbackAudioSource.isPlaying))
+        SetCaption(response.Transcript.Trim());
+        if (!IsAudioPending)
         {
             SetStatus("描いてください");
         }
@@ -515,52 +431,37 @@ public class ScreenToSpeech : MonoBehaviour
 
     // ----- 再生 -----
 
+    // 文字起こしだけで完了した場合、同じ回答の発話を1回だけ要求する。
+    IEnumerator RetryAudioCoroutine()
+    {
+        Debug.LogWarning("[ScreenToSpeech] 音声0件でturnComplete。音声を1回だけ再要求します。");
+        AddLog("再要求", "音声0件 / 1回だけ再要求");
+        yield return response.RetryAudio(SendTextAsync,
+            () => socket != null && socket.State == WebSocketState.Open,
+            ShowError, () => { CloseSocket(false); });
+    }
+
     IEnumerator PlaybackPumpCoroutine()
     {
         playbackCoroutineRunning = true;
         while (playbackCoroutineRunning)
         {
-            byte[] pcm;
-            if (!playbackPcmQueue.TryDequeue(out pcm))
-            {
-                yield return null;
-                continue;
-            }
-
-            EnsurePlaybackAudioSource();
-            AudioClip clip = AudioCodec.Pcm16ToClip(pcm, playbackSampleRate);
-            if (clip == null)
-            {
-                continue;
-            }
-
-            SetStatus("話しています");
-            playbackAudioSource.clip = clip;
-            playbackAudioSource.Play();
-            while (playbackAudioSource != null && playbackAudioSource.isPlaying)
-            {
-                yield return null;
-            }
-
-            Destroy(clip);
-            if (playbackPcmQueue.IsEmpty && !isTurnBusy)
-            {
-                SetStatus("描いてください");
-            }
+            // 境界を保たず連結して音声スレッドへ渡す。AudioSource.Playは起動時の1回だけ。
+            while (playbackPcmQueue.TryDequeue(out byte[] pcm))
+                pcmPlayer.Enqueue(pcm);
+            if (!isTurnBusy)
+                pcmPlayer.Complete();
+            yield return null;
         }
     }
 
     void ClearPlaybackQueue()
     {
-        byte[] ignored;
-        while (playbackPcmQueue.TryDequeue(out ignored))
+        while (playbackPcmQueue.TryDequeue(out byte[] ignored))
         {
         }
-
-        if (playbackAudioSource != null && playbackAudioSource.isPlaying)
-        {
-            playbackAudioSource.Stop();
-        }
+        if (pcmPlayer != null)
+            pcmPlayer.Clear();
     }
 
     // ----- 消す / 状態 / 字幕 -----
@@ -589,29 +490,16 @@ public class ScreenToSpeech : MonoBehaviour
         {
             SetStatus("描いてください");
         }
-    }
-
-    void SetStatus(string text)
-    {
-        if (statusText != null)
-        {
-            statusText.text = text;
-        }
-    }
-
-    void SetCaption(string text)
-    {
-        if (captionText != null)
-        {
-            captionText.text = text ?? string.Empty;
-        }
+        AddLog("描画", "キャンバスをクリア");
     }
 
     void ShowError(string message)
     {
+        dashboardError = message;
+        AddLog("エラー", message);
         Debug.LogError("[ScreenToSpeech] " + message);
         SetStatus("エラー");
-        isTurnBusy = false;
+        response.Cancel();
     }
 
     // EventSystem が無ければ足し、カメラ背景をシーンの色に合わせる
@@ -628,7 +516,8 @@ public class ScreenToSpeech : MonoBehaviour
     // シーンに EventSystem が無いときだけ作る
     void EnsureEventSystem()
     {
-        if (EventSystem.current != null)
+        // Start の実行順によっては既存の EventSystem がまだ current に登録されていない。
+        if (EventSystem.current != null || FindFirstObjectByType<EventSystem>() != null)
         {
             return;
         }
@@ -695,6 +584,11 @@ public class ScreenToSpeech : MonoBehaviour
         if (stopPlaybackPump)
         {
             playbackCoroutineRunning = false;
+            if (pcmPlayer != null)
+            {
+                Destroy(pcmPlayer);
+                pcmPlayer = null;
+            }
         }
 
         try

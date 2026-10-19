@@ -15,6 +15,48 @@ using System.Text;
 /// </summary>
 public static class GeminiJsonScan
 {
+    // ルート直下のオブジェクトキーだけを調べる。文字列内やネスト内の同名文字列は除外。
+    public static bool HasRootObject(string json, string key)
+    {
+        int depth = 0;
+        for (int i = 0; i < json.Length; i++)
+        {
+            char c = json[i];
+            if (c == '{' || c == '[')
+            {
+                depth++;
+                continue;
+            }
+            if (c == '}' || c == ']')
+            {
+                depth--;
+                continue;
+            }
+            if (c != '"')
+                continue;
+            int start = ++i;
+            while (i < json.Length && json[i] != '"')
+            {
+                if (json[i] == '\\')
+                    i++;
+                i++;
+            }
+            if (depth != 1 || i - start != key.Length
+                || string.CompareOrdinal(json, start, key, 0, key.Length) != 0)
+                continue;
+            int next = i + 1;
+            while (next < json.Length && char.IsWhiteSpace(json[next]))
+                next++;
+            if (next >= json.Length || json[next++] != ':')
+                continue;
+            while (next < json.Length && char.IsWhiteSpace(json[next]))
+                next++;
+            if (next < json.Length && json[next] == '{')
+                return true;
+        }
+        return false;
+    }
+
     // objectKey の後ろにある最初の "text" の値を返す（見つからなければ null）
     public static string NestedTextAfterKey(string json, string objectKey)
     {

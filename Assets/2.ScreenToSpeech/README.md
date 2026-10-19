@@ -28,6 +28,10 @@ APIキーは `Assets/Common/APIKey.txt` に設定してください。取得方�
 
 Projectウィンドウで `Assets/2.ScreenToSpeech/ScreenToSpeech.unity` を開き、Playしてください。
 
+画面左側は描画と小さな返答字幕、右側は実際に送ったJPEG・送受信ログ・設定要約です。ログには送信番号、容量、音声開始までの時間、音声受信量、完了時間を表示します。描画後も送信画像は次の送信まで保持されます。
+
+返答は初期設定で **日本語40文字以内・1文** をAIに指示します。Inspectorの **Response Character Limit** で調整できます。生成への指示なので厳密な文字数を保証するものではなく、音声の途中切断は行いません。
+
 ### 1. 絵を描く
 
 1. 上部の表示が「描いてください」に変わるまで待ってください。
@@ -64,14 +68,22 @@ AIに見せる画像は、カメラで撮った写真に限りません。**ア�
 
 ```json
 {
-  "realtimeInput": {
-    "video": {
-      "mimeType": "image/jpeg",
-      "data": "..."
-    }
+  "clientContent": {
+    "turns": [{
+      "role": "user",
+      "parts": [
+        {"inlineData": {"mimeType": "image/jpeg", "data": "..."}},
+        {"text": "このキャンバスに描かれている絵を、日本語で短く実況してください。"}
+      ]
+    }],
+    "turnComplete": true
   }
 }
 ```
+
+1. **`clientContent.turns`** — 画像と実況の指示を、1つのユーザーターンにまとめます。
+2. **`inlineData`** — JPEGの形式と、バイト列をBase64にした文字列を入れます。
+3. **`turnComplete: true`** — 入力を確定し、音声の返答を求めます。
 
 1のデモと同じ形式です。`data` には描画パッドのJPEGをBase64にした文字列が入ります。**画像の取得元を変えても、APIへの送信方法は共通です。**
 
@@ -89,17 +101,9 @@ AIに見せる画像は、カメラで撮った写真に限りません。**ア�
 
 ### 実況の指示と音声の返答
 
-画像に続いて、「この絵を実況してほしい」というテキストの指示も送ります。
+画像と「この絵を実況してほしい」という指示を、同じ `clientContent.turns[0].parts` に入れて送ります。`turnComplete: true` で返答を求めます。
 
-```json
-{
-  "realtimeInput": {
-    "text": "このキャンバスに描かれている絵を、日本語で短く実況してください。"
-  }
-}
-```
-
-1ターンの流れは、1のデモと同じ **`activityStart` → 画像 → 指示 → `activityEnd`** です。
+音声入力用の `activityStart` / `activityEnd` は使いません。1のデモと同じく、画像とテキストだけの入力で起きる切断と、画像の認識前に回答する競合を避けるため、1つのターンにまとめています。
 
 Inspectorの **System Instruction Text** は、AIの役割や話し方を決める事前指示です。接続時のSetupで送ります。**Frame Prompt Text** は、画像を送るたびに添える指示です。
 
@@ -126,7 +130,9 @@ Inspectorの **System Instruction Text** は、AIの役割や話し方を決め�
 4. **返答を振り分ける**
    `HandleServerMessage` — 音声を再生キューに入れ、`OnOutputTranscription` で字幕を更新する。`OnTurnComplete` で次の送信を許可する。
 5. **音声を再生する**
-   `PlaybackPumpCoroutine` — PCMを `AudioClip` に変換し、`AudioSource` で再生する。
+   `PlaybackPumpCoroutine` — 受信したPCMを共通の `PcmStreamPlayer` に渡し、音声スレッドで連続再生する。
+
+音声出力を確実に要求するため、設定と画像の指示には音声で返答する条件を付加します。文字起こしだけでターンが完了した場合は、画像を再送せず同じ回答の読み上げを1回だけ再要求します。それでも音声が届かなければエラーを表示し、再要求が20秒で完了しない場合は接続を閉じます。共通の指示ファイル自体は変更しません。
 
 ### DrawingPad（[`DrawingPad.cs`](Script/DrawingPad.cs)）
 
@@ -146,10 +152,21 @@ Inspectorの **System Instruction Text** は、AIの役割や話し方を決め�
 | ファイル | 中身 |
 |---|---|
 | [`GeminiJson`](../Common/Script/GeminiJson.cs) | JSONのエスケープ・整形 |
-| [`GeminiJsonScan`](../Common/Script/GeminiJsonScan.cs) | 受信JSONから値を取り出す |
+| [`GeminiLiveMessages`](../Common/Script/GeminiLiveMessages.cs) | Setup・画像送信JSONの生成と、音声・字幕・完了通知の解析 |
+| [`GeminiResponseTurn`](../Common/Script/GeminiResponseTurn.cs) | 返答1回分の状態と音声欠落時の再要求 |
 | [`GeminiKey`](../Common/Script/GeminiKey.cs) | APIキーの読込 |
-| [`AudioCodec`](../Common/Script/AudioCodec.cs) | PCMをUnityで再生できる音声に変換 |
+| [`PcmStreamPlayer`](../Common/Script/PcmStreamPlayer.cs) / [`PcmStreamBuffer`](../Common/Script/PcmStreamBuffer.cs) | PCMを連結して連続再生。初期値150msの先読みで受信間隔の揺れを吸収 |
 | [`TextureUtil`](../Common/Script/TextureUtil.cs) | 画像の縮小 |
 | [`ResponseTime`](../Common/Script/ResponseTime.cs) | 返答までの経過時間をConsoleに表示 |
 
 共通ライブラリは他のデモも使います。自分の作品用に挙動を変える場合は、デモの `Script/` にコピーしてクラス名を変えてください。
+
+### ダッシュボードの構成
+
+`ScreenToSpeech.Dashboard.cs` が送信JPEG、簡潔なログ、音声波形を更新します。Sceneの配置は `Tools > ScreenToSpeech > Rebuild Dashboard` で再生成できます（現在のUI配置を置き換えます）。描画テクスチャは横長の表示に合わせて1152×768、標準の送信画像は768×512です。
+
+### 共通処理の確認
+
+通信の接続・画像取得・送信タイミングは各デモに残し、メッセージ形式と返答状態を共通化しています。表示の更新は各 `Dashboard.cs`、UI生成の基本部品は `Common/Editor/DashboardLayoutElements.cs` が担当します。
+
+`Tools > Gemini Demos > Run Shared Checks` で、外部APIを使わずにJSON互換性、正常完了、音声0件の再要求、再要求上限、20秒タイムアウト、前の返答の待機処理が次に干渉しないことを検証できます。

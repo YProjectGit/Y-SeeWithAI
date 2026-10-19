@@ -1,15 +1,15 @@
 // VisionToSpeech.cs
-// 3B.SpeechToSpeechLiveAPI の姉妹デモ。マイク PCM ではなく WebCam の JPEG フレームを Live API に送る。
-// 左ペインにプレビュー・Stream トグル・吹き出し、中央に送信（Outbound）、右に受信（Inbound）。
+// WebCam の JPEG フレームを Live API に送り、音声と字幕で返答を表示する。
+// 上段: カメラ / 送信JPEG / 返答。下段: 設定 / 送信ログ / 受信ログ。
 //
 // 上からの流れ:
 //   Start → APIキー・systemInstruction・WebCam・AudioSource・Live 接続（Setup）
 //   【シャッター（既定）】
-//     Space → activityStart → JPEG 1枚 → 短いテキスト指示 → activityEnd → 音声返答
+//     Space → 画像と指示を clientContent の1ターンにまとめて送信 → 音声返答
 //   【ストリーミング】
 //     Stream トグル ON → 約1 FPS で同様の送信を繰り返す（このあいだ Space 無効）
 //     同じボタンで OFF → シャッターモードへ戻る
-//   受信 → serverContent の音声を再生キューへ / output transcription を吹き出しへ
+//   受信 → serverContent の音声を再生キューへ / output transcription を字幕へ
 
 using System;
 using System.Collections;
@@ -27,7 +27,7 @@ using UnityEngine.UI;
 /// <summary>
 /// Gemini Live API（WebSocket）で、カメラ画像から声の返答までを1セッションで可視化する。
 /// </summary>
-public class VisionToSpeech : MonoBehaviour
+public partial class VisionToSpeech : MonoBehaviour
 {
     // ===== インスペクタ: 設定 =====
 
@@ -35,6 +35,7 @@ public class VisionToSpeech : MonoBehaviour
     public string apiKeyRelativePath = "Common/APIKey.txt"; // Assets/ からの相対パス
     public string systemInstructionRelativePath = "Common/SystemInstruction.txt"; // 事前指示ファイル
     public string voiceName = "Kore"; // Setup の prebuilt 声色名
+    [Range(0.05f, 0.5f)] public float playbackBufferSeconds = 0.15f; // 通信の揺れを吸収する先読み秒数
     public int playbackSampleRate = 24000; // 受信 PCM の想定サンプルレート（Hz）
     public int maxSendLongSide = 768; // 送信 JPEG の長辺上限（推奨解像度）
     public int jpegQuality = 75; // EncodeToJPG の品質（1〜100）
@@ -43,20 +44,15 @@ public class VisionToSpeech : MonoBehaviour
     public string framePromptText =
         "この画像に写っているものを、日本語で短く説明してください。"; // フレームと一緒に送る指示
 
-    // ===== インスペクタ: 左ペイン =====
+    // ===== インスペクタ: カメラ・設定 =====
 
     public TMP_InputField systemInstructionField; // systemInstruction。空なら Setup に載せない
     public TMP_Text recordHintText; // Space / Stream モードの案内
     public Button streamModeButton; // ストリーミングのトグル
     public RawImage webcamPreview; // WebCam プレビュー（未設定なら起動時に生成）
-    public Transform messageContent; // バブルを並べる Content
-    public ChatBubble messageBubblePrefab; // 1A と同型の吹き出し Prefab
-    public ScrollRect chatScrollRect; // 新着時に下端へ
 
-    // ===== インスペクタ: 可視化（段階バー / 送信 / 受信） =====
+    // ===== インスペクタ: 設定 / 送信 / 受信 =====
 
-    public TMP_Text statusText; // 左下 Status
-    public TMP_Text stageBarText; // Connect → Send Frame → Receive PCM → Play
     public TMP_Text setupHeaderText; // 送信ペイン上部: Setup 設定エッセンス
     public TMP_Text outboundLogText; // 送信ログ（追記）
     public TMP_Text outboundStatusText; // 送信中（1行）
@@ -73,46 +69,27 @@ public class VisionToSpeech : MonoBehaviour
     CancellationTokenSource receiveCts; // 受信ループ停止用
     readonly ConcurrentQueue<Action> mainThreadActions = new ConcurrentQueue<Action>(); // 受信→メイン
     readonly ConcurrentQueue<byte[]> playbackPcmQueue = new ConcurrentQueue<byte[]>(); // 再生待ち PCM
-    readonly StringBuilder outboundLog = new StringBuilder(); // 送信ログ本文
-    readonly StringBuilder inboundLog = new StringBuilder(); // 受信ログ本文
-    readonly StringBuilder transcriptionLog = new StringBuilder(); // 文字起こしログ本文
 
     bool setupComplete; // setupComplete 受信済みか
     bool isConnected; // ソケットが Open か
     bool streamMode; // true=連続送信 / false=Space シャッター
-    bool isTurnBusy; // 1ターン送信中（二重送信防止）
+    readonly GeminiResponseTurn response = new GeminiResponseTurn();
+    bool isTurnBusy => response.IsBusy;
+    PcmStreamPlayer pcmPlayer;
     bool playbackCoroutineRunning; // 再生コルーチン稼働中か
     WebCamTexture webCamTexture; // プレビュー兼キャプチャ源
     Coroutine streamLoopCoroutine; // ストリーミング用ループ
     long outboundTotalBytes; // 送信累計バイト
-    long inboundTotalBytes; // 受信累計バイト
     int outboundFrameCount; // 送信フレーム数
-    int inboundChunkCount; // 受信チャンク数
-    string outputTranscriptBuffer; // 出力 transcription の蓄積
     DateTime systemInstructionFileWriteTimeUtc; // SystemInstruction.txt 同期用
-    bool statusBlink; // 接続中 / 応答待ちのとき Status を点滅させる
-    Stage currentStage = Stage.Connect; // 段階バー用
     TMP_Text streamModeButtonLabel; // ボタン上のラベル
     Image streamModeButtonImage; // ボタン色
-    string lastSetupJsonForDisplay; // Setup ヘッダ用
-    float replyWaitStarted = -1f; // 送信完了（activityEnd）時刻。未計測は -1
+    float replyWaitStarted = -1f; // 送信完了（turnComplete）時刻。未計測は -1
 
-    const int MaxLogChars = 8000; // ログ欄の上限
-    const float StatusBlinkSpeed = 6f; // 点滅の速さ（大きいほど速い）
     const int WebcamRequestWidth = 1280; // WebCam 要求解像度（プレビュー用）
     const int WebcamRequestHeight = 720;
-    static readonly Color StreamButtonOffColor = new Color(0.25f, 0.55f, 0.9f, 1f);
-    static readonly Color StreamButtonOnColor = new Color(0.2f, 0.65f, 0.35f, 1f);
     const string WsEndpoint =
         "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
-
-    enum Stage
-    {
-        Connect,
-        SendFrame,
-        ReceivePcm,
-        Play
-    }
 
     // ----- エントリポイント -----
 
@@ -127,23 +104,20 @@ public class VisionToSpeech : MonoBehaviour
         }
 
         EnsurePlaybackAudioSource();
+        pcmPlayer = playbackAudioSource.GetComponent<PcmStreamPlayer>();
+        if (pcmPlayer == null)
+            pcmPlayer = playbackAudioSource.gameObject.AddComponent<PcmStreamPlayer>();
+        pcmPlayer.Initialize(playbackSampleRate, playbackBufferSeconds);
         SetupStreamModeButton();
         EnsureWebcamPreview();
         SetupWebcam();
         InitPanelTexts();
-        RefreshModeUi();
+
+        InitializeDashboard();
 
         if (string.IsNullOrEmpty(apiKey))
         {
-            SetStatus("準備エラー（APIキー）", false);
-            SetStreamButtonInteractable(false);
             return;
-        }
-
-        if (webCamTexture == null)
-        {
-            SetStatus("準備エラー（カメラなし）", false);
-            // 接続は試みるが、送信はできない
         }
 
         StartCoroutine(ConnectLiveSessionCoroutine());
@@ -155,7 +129,7 @@ public class VisionToSpeech : MonoBehaviour
     {
         DrainMainThreadActions();
         UpdateShutterInput();
-        UpdateStatusBlink();
+        UpdateDashboard();
     }
 
     // 終了時にソケットとカメラを解放する
@@ -164,6 +138,8 @@ public class VisionToSpeech : MonoBehaviour
         StopStreamingInternal();
         CloseSocket(true);
         StopWebcam();
+        if (sentTexture != null)
+            Destroy(sentTexture);
     }
 
     // Stream トグルボタンのラベル／クリックを配線する
@@ -185,12 +161,6 @@ public class VisionToSpeech : MonoBehaviour
     // WebSocket を開き、最初の Setup JSON を送って setupComplete を待つ
     IEnumerator ConnectLiveSessionCoroutine()
     {
-        SetStage(Stage.Connect);
-        SetStatus("接続中…", true);
-        SetOutboundStatus("—");
-        SetInboundStatus("—");
-        SetStreamButtonInteractable(false);
-
         Uri uri = new Uri(WsEndpoint + "?key=" + Uri.EscapeDataString(apiKey));
         socket = new ClientWebSocket();
         receiveCts = new CancellationTokenSource();
@@ -207,12 +177,12 @@ public class VisionToSpeech : MonoBehaviour
                 ? connectTask.Exception.GetBaseException().Message
                 : "WebSocket を Open にできませんでした";
             ShowError("Live 接続失敗: " + err);
-            SetStreamButtonInteractable(true);
+
             yield break;
         }
 
         string setupJson = BuildSetupJson();
-        RefreshSetupHeader(setupJson);
+
         SetInboundHeaderStatic();
 
         Task sendSetup = SendTextAsync(setupJson);
@@ -224,11 +194,11 @@ public class VisionToSpeech : MonoBehaviour
         if (sendSetup.IsFaulted)
         {
             ShowError("Setup 送信失敗: " + sendSetup.Exception.GetBaseException().Message);
-            SetStreamButtonInteractable(true);
+
             yield break;
         }
 
-        AppendOutboundLog("Setup 送信完了（設定は上部ヘッダ）");
+        AppendOutboundLog("setup 送信完了 / AUDIO / outputAudioTranscription");
         _ = Task.Run(() => ReceiveLoopAsync(receiveCts.Token));
 
         float wait = 0f;
@@ -237,7 +207,6 @@ public class VisionToSpeech : MonoBehaviour
             wait += Time.unscaledDeltaTime;
             if (socket == null || socket.State != WebSocketState.Open)
             {
-                SetStreamButtonInteractable(true);
                 yield break;
             }
 
@@ -247,55 +216,20 @@ public class VisionToSpeech : MonoBehaviour
         if (!setupComplete)
         {
             ShowError("setupComplete がタイムアウトしました。モデル名とキーを確認してください。");
-            SetStreamButtonInteractable(true);
+
             yield break;
         }
 
         isConnected = true;
-        SetStage(Stage.Connect);
-        SetStreamButtonInteractable(true);
-        RefreshModeUi();
-        SetStatus(GetReadyStatusText(), false);
+
         Debug.Log("[VisionToSpeech] Live セッション準備完了。stream=" + streamMode);
     }
 
     // Setup メッセージ（最初に1回だけ送るセッション設定）
     string BuildSetupJson()
     {
-        StringBuilder sb = new StringBuilder(512);
-        sb.Append("{\"setup\":{");
-        sb.Append("\"model\":\"models/");
-        sb.Append(GeminiJson.Escape(modelName));
-        sb.Append("\",");
-
-        // シャッター／ストリームともクライアントが activityStart/End でターンを区切る
-        sb.Append("\"realtimeInputConfig\":{\"automaticActivityDetection\":{\"disabled\":true}},");
-        sb.Append("\"outputAudioTranscription\":{},");
-
-        string instruction = GetSystemInstructionText();
-        if (!string.IsNullOrEmpty(instruction))
-        {
-            sb.Append("\"systemInstruction\":{\"parts\":[{\"text\":\"");
-            sb.Append(GeminiJson.Escape(instruction));
-            sb.Append("\"}]},");
-        }
-
-        sb.Append("\"generationConfig\":{");
-        sb.Append("\"responseModalities\":[\"AUDIO\"],");
-        if (!string.IsNullOrEmpty(mediaResolution))
-        {
-            // GenerationConfig のフィールド。setup 直下に置くとサーバが切断する
-            sb.Append("\"mediaResolution\":\"");
-            sb.Append(GeminiJson.Escape(mediaResolution));
-            sb.Append("\",");
-        }
-
-        sb.Append("\"speechConfig\":{\"voiceConfig\":{\"prebuiltVoiceConfig\":{\"voiceName\":\"");
-        sb.Append(GeminiJson.Escape(voiceName));
-        sb.Append("\"}}}");
-        sb.Append('}'); // generationConfig
-        sb.Append("}}"); // setup + root
-        return sb.ToString();
+        return GeminiLiveMessages.Setup(modelName, voiceName, mediaResolution,
+            GeminiAudioResponse.WithAudioInstruction(GetSystemInstructionText()));
     }
 
     // ----- Stream トグル -----
@@ -316,22 +250,16 @@ public class VisionToSpeech : MonoBehaviour
         }
 
         streamMode = !streamMode;
-        RefreshModeUi();
 
         if (streamMode)
         {
             AppendOutboundLog("stream ON（約 " + streamIntervalSeconds + "s 間隔）");
             streamLoopCoroutine = StartCoroutine(StreamLoopCoroutine());
-            SetStatus("ストリーミング中（Space 無効）", true);
-            SetOutboundStatus("連続送信");
         }
         else
         {
             StopStreamingInternal();
             AppendOutboundLog("stream OFF（シャッターへ）");
-            SetOutboundStatus("—");
-            SetStatus(GetReadyStatusText(), false);
-            SetStage(Stage.Connect);
         }
     }
 
@@ -341,7 +269,7 @@ public class VisionToSpeech : MonoBehaviour
         // 直後に1回送り、以降は間隔待ち
         while (streamMode && isConnected)
         {
-            if (!isTurnBusy)
+            if (!isTurnBusy && !IsAudioPending)
             {
                 yield return StartCoroutine(SendFrameTurnCoroutine(true));
             }
@@ -367,65 +295,12 @@ public class VisionToSpeech : MonoBehaviour
         }
     }
 
-    // 案内文・ボタン表示をモードに合わせる
-    void RefreshModeUi()
-    {
-        if (recordHintText != null)
-        {
-            recordHintText.text = streamMode
-                ? "ストリーミング中（Space 無効）"
-                : "Space でシャッター（1フレーム送信）";
-        }
-
-        if (streamModeButtonLabel != null)
-        {
-            streamModeButtonLabel.text = streamMode ? "Stream ON" : "Stream";
-        }
-
-        if (streamModeButtonImage != null)
-        {
-            streamModeButtonImage.color = streamMode ? StreamButtonOnColor : StreamButtonOffColor;
-        }
-
-        if (setupHeaderText == null)
-        {
-            return;
-        }
-
-        if (!string.IsNullOrEmpty(lastSetupJsonForDisplay) && isConnected)
-        {
-            setupHeaderText.text =
-                BuildSetupSettingsSummary() + "\n\n"
-                + GeminiJson.PrettyPrint(GeminiJson.Truncate(lastSetupJsonForDisplay, 400));
-        }
-        else
-        {
-            setupHeaderText.text =
-                BuildSetupSettingsSummary() + "\n\n（接続後に Setup JSON を表示）";
-        }
-    }
-
-    void SetStreamButtonInteractable(bool interactable)
-    {
-        if (streamModeButton != null)
-        {
-            streamModeButton.interactable = interactable;
-        }
-    }
-
-    string GetReadyStatusText()
-    {
-        return streamMode
-            ? "ストリーミング中（Space 無効）"
-            : "接続済み（Space でシャッター）";
-    }
-
     // ----- Space シャッター -----
 
     // ストリーム OFF・非ビジーのときだけ Space Down で1フレーム送信
     void UpdateShutterInput()
     {
-        if (streamMode || isTurnBusy || !isConnected || !setupComplete)
+        if (streamMode || isTurnBusy || IsAudioPending || !isConnected || !setupComplete)
         {
             return;
         }
@@ -443,6 +318,8 @@ public class VisionToSpeech : MonoBehaviour
 
     bool IsTypingInSystemInstruction()
     {
+        if (framePromptField != null && framePromptField.isFocused)
+            return true;
         if (systemInstructionField != null && systemInstructionField.isFocused)
         {
             return true;
@@ -457,7 +334,7 @@ public class VisionToSpeech : MonoBehaviour
                && EventSystem.current.currentSelectedGameObject == systemInstructionField.gameObject;
     }
 
-    // 1ターン: activityStart → JPEG → テキスト指示 → activityEnd
+    // 画像とテキストを1つの clientContent に入れ、turnComplete で返答を求める
     IEnumerator SendFrameTurnCoroutine(bool fromStream)
     {
         if (isTurnBusy)
@@ -477,63 +354,48 @@ public class VisionToSpeech : MonoBehaviour
             yield break;
         }
 
-        isTurnBusy = true;
-        SyncSystemInstructionBeforeSend();
-        outputTranscriptBuffer = string.Empty;
-
         int width;
         int height;
         byte[] jpegBytes;
         if (!TryCaptureJpeg(out jpegBytes, out width, out height))
         {
             ShowError("フレームの JPEG 化に失敗しました。");
-            isTurnBusy = false;
             yield break;
         }
+        yield return SendImageTurnCoroutine(jpegBytes, width, height, fromStream);
+    }
 
-        SetStage(Stage.SendFrame);
-        SetStatus(fromStream ? "ストリーム送信中" : "シャッター送信中", true);
-        SetOutboundStatus(fromStream ? "連続送信" : "送信中");
-        SetInboundStatus("—");
+    // キャプチャ後の共通経路。送信成功した JPEG だけを画面へ反映する。
+    IEnumerator SendImageTurnCoroutine(byte[] jpegBytes, int width, int height, bool fromStream)
+    {
+        if (isTurnBusy || IsAudioPending || !isConnected || !setupComplete)
+            yield break;
+        response.Begin();
+        SyncSystemInstructionBeforeSend();
+        BeginDashboardTurn();
 
-        yield return StartCoroutine(SendJsonCoroutine("{\"realtimeInput\":{\"activityStart\":{}}}"));
-        AppendOutboundLog("activityStart");
-
-        string b64 = Convert.ToBase64String(jpegBytes);
-        string videoJson =
-            "{\"realtimeInput\":{\"video\":{\"mimeType\":\"image/jpeg\",\"data\":\""
-            + b64
-            + "\"}}}";
-        yield return StartCoroutine(SendJsonCoroutine(videoJson));
-
-        outboundFrameCount++;
-        outboundTotalBytes += jpegBytes.Length;
-        AppendOutboundLog(
-            "+frame " + width + "x" + height + " " + jpegBytes.Length + "B / total "
-            + outboundTotalBytes + "B  #" + outboundFrameCount);
-
-        // 画像だけだと応答のきっかけが弱いことがあるので、短い指示テキストも同じターンで送る
-        // 3.1 Live は会話中の clientContent を拒否するので realtimeInput.text を使う
+        // 画像と指示を同じターンに含め、画像の到着前に回答が始まる競合を防ぐ。
+        // 音声用の activityStart/End は送らない（画像・テキストのみでは切断される）。
         string prompt = string.IsNullOrEmpty(framePromptText)
             ? "この画像を日本語で短く説明してください。"
             : framePromptText;
-        string textJson =
-            "{\"realtimeInput\":{\"text\":\""
-            + GeminiJson.Escape(prompt)
-            + "\"}}";
-        yield return StartCoroutine(SendJsonCoroutine(textJson));
-        AppendOutboundLog("realtimeInput text（説明指示）");
+        prompt = GeminiAudioResponse.WithAudioInstruction(prompt);
+        string turnJson = GeminiLiveMessages.ImageTurn(jpegBytes, prompt);
+        Task sendTask = SendTextAsync(turnJson);
+        while (!sendTask.IsCompleted)
+            yield return null;
+        if (sendTask.IsFaulted || sendTask.IsCanceled)
+        {
+            ShowError("画像の送信に失敗しました: " + (sendTask.Exception?.GetBaseException().Message ?? "キャンセル"));
+            yield break;
+        }
 
-        yield return StartCoroutine(SendJsonCoroutine("{\"realtimeInput\":{\"activityEnd\":{}}}"));
-        AppendOutboundLog("activityEnd");
-        replyWaitStarted = Time.realtimeSinceStartup; // 送信完了。返信までの計測用
-
-        AddBubble("You", "（キャプチャ " + width + "x" + height + "）", true);
-
-        SetOutboundStatus(fromStream ? "連続送信" : "—");
-        SetInboundStatus("受信待ち");
-        SetStatus("返答待ち", true);
-        SetStage(Stage.ReceivePcm);
+        outboundFrameCount++;
+        outboundTotalBytes += jpegBytes.Length;
+        ShowSentFrame(jpegBytes, width, height);
+        AppendOutboundLog($"#{outboundFrameCount:000}  JPEG {width}×{height} / {jpegBytes.Length / 1024f:0.0} KB");
+        AppendOutboundLog("clientContent\n    role: user\n    parts: inlineData + text\n    turnComplete: true");
+        replyWaitStarted = Time.realtimeSinceStartup;
         // isTurnBusy は turnComplete で解除（ストリームは完了を待ってから次フレーム）
     }
 
@@ -575,25 +437,6 @@ public class VisionToSpeech : MonoBehaviour
 
     // ----- 送受信 -----
 
-    IEnumerator SendJsonCoroutine(string json)
-    {
-        if (socket == null || socket.State != WebSocketState.Open)
-        {
-            yield break;
-        }
-
-        Task task = SendTextAsync(json);
-        while (!task.IsCompleted)
-        {
-            yield return null;
-        }
-
-        if (task.IsFaulted)
-        {
-            EnqueueMain(() => ShowError("送信エラー: " + task.Exception.GetBaseException().Message));
-        }
-    }
-
     async Task SendTextAsync(string json)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(json);
@@ -624,13 +467,11 @@ public class VisionToSpeech : MonoBehaviour
                             EnqueueMain(() =>
                             {
                                 isConnected = false;
+                                response.Cancel();
+                                StopStreamingInternal();
                                 if (!string.IsNullOrEmpty(closeReason))
                                 {
                                     ShowError("切断: " + closeReason);
-                                }
-                                else
-                                {
-                                    SetStatus("切断されました", false);
                                 }
                             });
                             return;
@@ -651,411 +492,121 @@ public class VisionToSpeech : MonoBehaviour
         }
         catch (Exception e)
         {
-            EnqueueMain(() => ShowError("受信ループ例外: " + e.Message));
+            EnqueueMain(() => { isConnected = false; StopStreamingInternal(); ShowError("受信ループ例外: " + e.Message); });
         }
     }
 
-    // サーバ JSON を種別ごとに振り分ける（教材用の最小パーサ）
+    // 共通パーサで受信イベントを読み、デモ固有の処理へ渡す。
     void HandleServerMessage(string json)
     {
-        if (string.IsNullOrEmpty(json))
+        var message = GeminiLiveMessages.Parse(json);
+        if (message.SetupComplete)
         {
+            EnqueueMain(() => { setupComplete = true; AppendInboundLog("setupComplete / 接続済み"); });
             return;
         }
-
-        if (json.IndexOf("\"setupComplete\"", StringComparison.Ordinal) >= 0)
+        foreach (var pcm in message.Audio)
         {
+            playbackPcmQueue.Enqueue(pcm);
             EnqueueMain(() =>
             {
-                setupComplete = true;
-                AppendOutboundLog("setupComplete 受信");
+                response.AddAudio();
+                RecordAudioChunk(pcm.Length);
+                AppendInboundLog($"chunk {response.AudioChunks:00} / {pcm.Length / 1024f:0.0} KB / 累計 {turnAudioBytes / 1024f:0.0} KB");
             });
-            return;
         }
-
-        TryExtractAndEnqueueAudio(json);
-
-        if (json.IndexOf("\"outputTranscription\"", StringComparison.Ordinal) >= 0)
-        {
-            string t = GeminiJsonScan.NestedTextAfterKey(json, "outputTranscription");
-            if (!string.IsNullOrEmpty(t))
-            {
-                EnqueueMain(() => OnOutputTranscription(t));
-            }
-        }
-
-        if (json.IndexOf("\"turnComplete\":true", StringComparison.Ordinal) >= 0
-            || json.IndexOf("\"turnComplete\": true", StringComparison.Ordinal) >= 0)
-        {
+        if (!string.IsNullOrEmpty(message.Transcript))
+            EnqueueMain(() => OnOutputTranscription(message.Transcript));
+        if (message.TurnComplete)
             EnqueueMain(OnTurnComplete);
-        }
-
-        if (json.IndexOf("\"interrupted\":true", StringComparison.Ordinal) >= 0)
-        {
-            EnqueueMain(() =>
-            {
-                ClearPlaybackQueue();
-                SetInboundStatus("割り込み");
-            });
-        }
-    }
-
-    void TryExtractAndEnqueueAudio(string json)
-    {
-        const string marker = "\"data\":\"";
-        if (json.IndexOf("\"inlineData\"", StringComparison.Ordinal) < 0
-            && json.IndexOf("\"inline_data\"", StringComparison.Ordinal) < 0)
-        {
-            return;
-        }
-
-        if (json.IndexOf("audio", StringComparison.OrdinalIgnoreCase) < 0)
-        {
-            return;
-        }
-
-        int searchFrom = 0;
-        while (true)
-        {
-            int dataIndex = json.IndexOf(marker, searchFrom, StringComparison.Ordinal);
-            if (dataIndex < 0)
-            {
-                break;
-            }
-
-            int valueStart = dataIndex + marker.Length;
-            int valueEnd = json.IndexOf('"', valueStart);
-            if (valueEnd < 0)
-            {
-                break;
-            }
-
-            string b64 = json.Substring(valueStart, valueEnd - valueStart);
-            searchFrom = valueEnd + 1;
-            if (b64.Length < 64)
-            {
-                continue;
-            }
-
-            try
-            {
-                byte[] pcm = Convert.FromBase64String(b64);
-                if (pcm.Length < 2)
-                {
-                    continue;
-                }
-
-                playbackPcmQueue.Enqueue(pcm);
-                int len = pcm.Length;
-                EnqueueMain(() =>
-                {
-                    inboundChunkCount++;
-                    inboundTotalBytes += len;
-                    AppendInboundLog(
-                        "+audio " + len + "B / total " + inboundTotalBytes + "B  " + playbackSampleRate + "Hz");
-                    SetStage(Stage.ReceivePcm);
-                    SetInboundStatus("受信中");
-                });
-            }
-            catch (FormatException)
-            {
-                // 非 Base64 は無視
-            }
-        }
+        if (message.Interrupted)
+            EnqueueMain(ClearPlaybackQueue);
     }
 
     void OnOutputTranscription(string fragment)
     {
-        outputTranscriptBuffer = (outputTranscriptBuffer ?? string.Empty) + fragment;
-        AppendTranscriptionLog("out: " + fragment);
-        SetStage(Stage.ReceivePcm);
+        response.AppendTranscript(fragment);
+        SetResponseCaption(response.Transcript);
+        AppendInboundLog("outputTranscription: " + fragment);
     }
 
-    // ターン完了: 吹き出し確定、ビジー解除、再生段階へ
+    // ターン完了: 最新の返答を保持し、ビジー解除
     void OnTurnComplete()
     {
+        var completion = response.Complete();
+        if (completion == GeminiResponseTurn.Completion.Ignored)
+            return;
+        if (completion == GeminiResponseTurn.Completion.RetryAudio)
+        {
+            StartCoroutine(RetryAudioCoroutine());
+            return;
+        }
+        if (completion == GeminiResponseTurn.Completion.Failed)
+        {
+            StopStreamingInternal();
+            ShowError(GeminiResponseTurn.MissingAudioError);
+            return;
+        }
+        CompleteDashboardTurn();
         if (replyWaitStarted >= 0f)
         {
             ResponseTime.Log("合計", replyWaitStarted);
             replyWaitStarted = -1f;
         }
 
-        string modelText = (outputTranscriptBuffer ?? string.Empty).Trim();
+        AppendInboundLog("turnComplete");
+
+        string modelText = (response.Transcript ?? string.Empty).Trim();
         if (!string.IsNullOrEmpty(modelText))
         {
-            AddBubble("Gemini", modelText, false);
+            completedResponse = modelText;
         }
 
-        outputTranscriptBuffer = string.Empty;
-        isTurnBusy = false;
-        SetInboundStatus(playbackPcmQueue.IsEmpty ? "—" : "再生中");
-        if (!playbackPcmQueue.IsEmpty)
-        {
-            SetStage(Stage.Play);
-        }
-
-        if (streamMode)
-        {
-            SetStatus("ストリーミング中（Space 無効）", true);
-            SetOutboundStatus("連続送信");
-            SetStage(Stage.SendFrame);
-        }
-        else
-        {
-            SetStatus(GetReadyStatusText(), false);
-            SetOutboundStatus("—");
-        }
+        SetResponseCaption(response.Transcript);
     }
 
     // ----- 再生 -----
+
+    // 文字起こしだけで完了した場合、同じ回答の発話を1回だけ要求する。
+    IEnumerator RetryAudioCoroutine()
+    {
+        Debug.LogWarning("[VisionToSpeech] 音声0件でturnComplete。音声を1回だけ再要求します。");
+        AppendInboundLog("音声0件 / 同じ返答の音声を再要求（1/1）");
+        yield return response.RetryAudio(SendTextAsync,
+            () => socket != null && socket.State == WebSocketState.Open,
+            ShowError, () => { StopStreamingInternal(); CloseSocket(false); });
+    }
 
     IEnumerator PlaybackPumpCoroutine()
     {
         playbackCoroutineRunning = true;
         while (playbackCoroutineRunning)
         {
-            byte[] pcm;
-            if (!playbackPcmQueue.TryDequeue(out pcm))
-            {
-                yield return null;
-                continue;
-            }
-
-            EnsurePlaybackAudioSource();
-            AudioClip clip = AudioCodec.Pcm16ToClip(pcm, playbackSampleRate);
-            if (clip == null)
-            {
-                continue;
-            }
-
-            SetStage(Stage.Play);
-            SetInboundStatus("再生中");
-            playbackAudioSource.clip = clip;
-            playbackAudioSource.Play();
-            while (playbackAudioSource != null && playbackAudioSource.isPlaying)
-            {
-                yield return null;
-            }
-
-            Destroy(clip);
-            if (playbackPcmQueue.IsEmpty)
-            {
-                SetInboundStatus("—");
-                if (!streamMode && !isTurnBusy)
-                {
-                    SetStage(Stage.Connect);
-                }
-                else if (streamMode)
-                {
-                    SetStage(Stage.SendFrame);
-                }
-            }
+            // 境界を保たず連結して音声スレッドへ渡す。AudioSource.Playは起動時の1回だけ。
+            while (playbackPcmQueue.TryDequeue(out byte[] pcm))
+                pcmPlayer.Enqueue(pcm);
+            if (!isTurnBusy)
+                pcmPlayer.Complete();
+            yield return null;
         }
     }
 
     void ClearPlaybackQueue()
     {
-        byte[] ignored;
-        while (playbackPcmQueue.TryDequeue(out ignored))
+        while (playbackPcmQueue.TryDequeue(out byte[] ignored))
         {
         }
-
-        if (playbackAudioSource != null && playbackAudioSource.isPlaying)
-        {
-            playbackAudioSource.Stop();
-        }
-    }
-
-    // ----- UI / ログ -----
-
-    void InitPanelTexts()
-    {
-        SetStage(Stage.Connect);
-        if (outboundLogText != null)
-        {
-            outboundLogText.text = "（まだ送信していません）";
-        }
-
-        if (inboundLogText != null)
-        {
-            inboundLogText.text = "（まだ受信していません）";
-        }
-
-        if (transcriptionText != null)
-        {
-            transcriptionText.text = "（transcription 待ち）";
-        }
-
-        SetOutboundStatus("—");
-        SetInboundStatus("—");
-        SetInboundHeaderStatic();
-        if (setupHeaderText != null)
-        {
-            setupHeaderText.text =
-                BuildSetupSettingsSummary() + "\n\n（接続後に Setup JSON を表示）";
-        }
-    }
-
-    string BuildSetupSettingsSummary()
-    {
-        string modeLine = streamMode
-            ? "mode: stream (~" + streamIntervalSeconds + "s)\n"
-            : "mode: shutter (Space → 1 frame)\n";
-
-        return "model: " + modelName + "\n"
-               + "responseModalities: AUDIO\n"
-               + "voice: " + voiceName + "\n"
-               + "transcription: output ON\n"
-               + "mediaResolution: " + mediaResolution + "\n"
-               + "send: JPEG ≤" + maxSendLongSide + "\n"
-               + modeLine
-               + "key: " + GeminiKey.Mask(apiKey);
-    }
-
-    void RefreshSetupHeader(string setupJson)
-    {
-        lastSetupJsonForDisplay = setupJson;
-        if (setupHeaderText == null)
-        {
-            return;
-        }
-
-        setupHeaderText.text =
-            BuildSetupSettingsSummary() + "\n\n"
-            + GeminiJson.PrettyPrint(GeminiJson.Truncate(setupJson, 400));
-    }
-
-    void SetInboundHeaderStatic()
-    {
-        if (inboundHeaderText == null)
-        {
-            return;
-        }
-
-        inboundHeaderText.text =
-            "output: PCM " + playbackSampleRate + "Hz\n"
-            + "mime: audio/pcm (L16 LE)\n"
-            + "channels: 1\n"
-            + "transcription: serverContent 経由";
-    }
-
-    void SetStage(Stage stage)
-    {
-        currentStage = stage;
-        if (stageBarText == null)
-        {
-            return;
-        }
-
-        string c = stage == Stage.Connect ? "[Connect]" : "Connect";
-        string s = stage == Stage.SendFrame ? "[Send Frame]" : "Send Frame";
-        string r = stage == Stage.ReceivePcm ? "[Receive PCM]" : "Receive PCM";
-        string p = stage == Stage.Play ? "[Play]" : "Play";
-        stageBarText.text = c + " → " + s + " → " + r + " → " + p;
-    }
-
-    void AppendOutboundLog(string line)
-    {
-        AppendLog(outboundLog, outboundLogText, line);
-    }
-
-    void AppendInboundLog(string line)
-    {
-        AppendLog(inboundLog, inboundLogText, line);
-    }
-
-    void AppendTranscriptionLog(string line)
-    {
-        AppendLog(transcriptionLog, transcriptionText, line);
-    }
-
-    static void AppendLog(StringBuilder sb, TMP_Text view, string line)
-    {
-        if (sb.Length > 0)
-        {
-            sb.Append('\n');
-        }
-
-        sb.Append(line);
-        if (sb.Length > MaxLogChars)
-        {
-            sb.Remove(0, sb.Length - MaxLogChars);
-        }
-
-        if (view != null)
-        {
-            view.text = sb.ToString();
-        }
-    }
-
-    void SetOutboundStatus(string text)
-    {
-        if (outboundStatusText != null)
-        {
-            outboundStatusText.text = text;
-        }
-    }
-
-    void SetInboundStatus(string text)
-    {
-        if (inboundStatusText != null)
-        {
-            inboundStatusText.text = text;
-        }
-    }
-
-    // Status 欄を日本語で更新する。blink=true のとき点滅（接続中 / 応答待ち用）
-    void SetStatus(string statusJapanese, bool blink)
-    {
-        statusBlink = blink;
-        if (statusText == null)
-        {
-            return;
-        }
-
-        statusText.text = statusJapanese;
-        Color color = statusText.color;
-        color.a = 1f;
-        statusText.color = color;
-    }
-
-    // 接続中・応答待ちのあいだだけアルファを上下させて点滅させる
-    void UpdateStatusBlink()
-    {
-        if (!statusBlink || statusText == null)
-        {
-            return;
-        }
-
-        float wave = (Mathf.Sin(Time.unscaledTime * StatusBlinkSpeed) + 1f) * 0.5f;
-        Color color = statusText.color;
-        color.a = Mathf.Lerp(0.25f, 1f, wave);
-        statusText.color = color;
+        if (pcmPlayer != null)
+            pcmPlayer.Clear();
     }
 
     void ShowError(string message)
     {
         Debug.LogError("[VisionToSpeech] " + message);
-        SetStatus("エラー", false);
-        isTurnBusy = false;
-        AddBubble("Error", message, false);
+        dashboardError = message;
+        SetResponseCaption(message);
+        response.Cancel();
         AppendInboundLog("[Error] " + message);
-    }
-
-    void AddBubble(string speaker, string body, bool isUser)
-    {
-        if (messageBubblePrefab == null || messageContent == null)
-        {
-            return;
-        }
-
-        ChatBubble bubble = Instantiate(messageBubblePrefab, messageContent);
-        bubble.SetMessage(speaker, body, isUser);
-        Canvas.ForceUpdateCanvases();
-        if (chatScrollRect != null)
-        {
-            chatScrollRect.verticalNormalizedPosition = 0f;
-        }
     }
 
     // ----- WebCam / 再生 -----
@@ -1266,6 +817,11 @@ public class VisionToSpeech : MonoBehaviour
         if (stopPlaybackPump)
         {
             playbackCoroutineRunning = false;
+            if (pcmPlayer != null)
+            {
+                Destroy(pcmPlayer);
+                pcmPlayer = null;
+            }
         }
 
         try
